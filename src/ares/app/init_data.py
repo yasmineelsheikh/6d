@@ -139,6 +139,9 @@ def initialize_data(tmp_dump_dir: str) -> None:
     # Process each index type
     for index_name in META_INDEX_NAMES:
         print(f"Processing {index_name} index")
+        if index_name not in index_manager.indices:
+            print(f"Index {index_name} not found, skipping.")
+            continue
         stored_embeddings = index_manager.indices[index_name].get_all_vectors()
         stored_ids = index_manager.indices[index_name].get_all_ids()
         # Try loading from cache first

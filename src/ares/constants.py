@@ -1,7 +1,9 @@
 import os
 from collections import defaultdict
 
-ARES_DATA_DIR = "/workspaces/ares/data"
+# Get the project root directory (2 levels up from this file)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ARES_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 ARES_OXE_DIR = os.path.join(ARES_DATA_DIR, "oxe")
 ARES_VIDEO_DIR = os.path.join(ARES_DATA_DIR, "videos")
 

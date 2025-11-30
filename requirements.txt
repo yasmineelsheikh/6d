@@ -41,4 +41,9 @@ matplotlib
 openpyxl
 
 # database
-faiss-cpu # replace with faiss-gpu if available 
+#faiss-cpu # replace with faiss-gpu if available 
+
+# runpod and cloud storage
+runpod>=1.6.0
+boto3>=1.34.0
+ 

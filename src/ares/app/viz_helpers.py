@@ -120,20 +120,22 @@ def create_tabbed_visualizations(
 
 
 def display_video_grid(
-    filtered_df: pd.DataFrame, max_videos: int = 5, lazy_load: bool = False
+    filtered_df: pd.DataFrame, max_videos: int = 5, lazy_load: bool = False, show_info: bool = True
 ) -> None:
     """Display a grid of video cards for the first N rows of the dataframe.
 
     Args:
         filtered_df: DataFrame containing rollout data
         max_videos: Maximum number of videos to display in the grid
+        lazy_load: Whether to lazy load videos (show placeholder first)
+        show_info: Whether to show info below each video
     """
     n_videos = min(max_videos, len(filtered_df))
     video_cols = st.columns(n_videos)
 
     for i, (_, row) in enumerate(filtered_df.head(n_videos).iterrows()):
         with video_cols[i]:
-            display_video_card(dict(row), lazy_load=lazy_load, key=f"video_card_{i}")
+            display_video_card(dict(row), lazy_load=lazy_load, key=f"video_card_{i}", show_info=show_info)
 
 
 def create_embedding_similarity_visualization(

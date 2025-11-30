@@ -13,6 +13,17 @@ from plotly.subplots import make_subplots
 from ares.utils.image_utils import get_video_frames, get_video_mp4
 
 
+# Custom Color Palette
+COLORS = [
+    "#F63366",  # Primary Red
+    "#FFFD80",  # Yellow
+    "#00D4FF",  # Cyan
+    "#FF4B4B",  # Red
+    "#1C83E1",  # Blue
+    "#803DFD",  # Purple
+    "#00C0F2",  # Light Blue
+]
+
 def create_line_plot(
     df: pd.DataFrame,
     x: str,
@@ -22,6 +33,10 @@ def create_line_plot(
     colors: list[str],
     y_format: str | None = None,
 ) -> plotly.graph_objects.Figure:
+    # Use custom colors if not provided or if default
+    if not colors or colors == ["#1f77b4"]:
+        colors = COLORS
+
     fig = px.line(
         df,
         x=x,
@@ -34,10 +49,15 @@ def create_line_plot(
         "yaxis_title": labels.get("value", "Value"),
         "showlegend": True,
         "legend_title_text": "",
+        "plot_bgcolor": "rgba(0,0,0,0)",
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "font": {"family": "sans-serif"},
     }
     if y_format:
         layout_args["yaxis_tickformat"] = y_format
     fig.update_layout(**layout_args)
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
     return fig
 
 
@@ -49,6 +69,10 @@ def create_histogram(
     color: str,
     nbins: int = 30,
 ) -> plotly.graph_objects.Figure:
+    # Use primary color if default provided
+    if color == "#2ecc71" or not color: # Assuming #2ecc71 was a default green used elsewhere
+        color = COLORS[0]
+
     fig = px.histogram(
         df,
         x=x,
@@ -64,8 +88,13 @@ def create_histogram(
         yaxis_title="count",
         showlegend=False,
         bargap=0.1,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={"family": "sans-serif"},
     )
-    fig.update_traces(marker_line_width=1, marker_line_color="black")
+    fig.update_traces(marker_line_width=1, marker_line_color="white")
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
     return fig
 
 
@@ -77,6 +106,10 @@ def create_bar_plot(
     labels: dict[str, str],
     color: str,
 ) -> plotly.graph_objects.Figure:
+    # Use primary color if default provided
+    if color == "#2ecc71" or not color:
+        color = COLORS[2] # Use a different color for bars
+
     fig = px.bar(
         df,
         x=x,
@@ -89,7 +122,12 @@ def create_bar_plot(
         xaxis_title=labels.get(x, x),
         yaxis_title=labels.get(y, y),
         showlegend=False,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={"family": "sans-serif"},
     )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
     return fig
 
 
@@ -142,7 +180,13 @@ def create_robot_array_plot(
         vertical_spacing=0.02,  # Reduce spacing between plots
         row_heights=[1 / n_dims] * n_dims,  # Ensure equal height distribution
     )
-    fig.update_layout(title=title_base, showlegend=True)
+    fig.update_layout(
+        title=title_base,
+        showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={"family": "sans-serif"},
+    )
 
     for dim in range(n_dims):
         dim_traces = []  # Create a new list for this dimension's traces
@@ -183,7 +227,7 @@ def create_robot_array_plot(
                     x=x,
                     y=y,
                     mode="lines",
-                    line=dict(color="blue", width=1),
+                    line=dict(color=COLORS[4], width=1), # Use blue from palette
                     opacity=0.3,
                     name="Other Trajectories",
                     legendgroup="other",
@@ -201,7 +245,7 @@ def create_robot_array_plot(
                     y=robot_array[highlight_idx, :, dim],
                     mode="lines",
                     name=name,
-                    line=dict(color="red", width=3),
+                    line=dict(color=COLORS[0], width=3), # Use primary red
                     opacity=1.0,
                     showlegend=dim == 0,  # Only show legend for first dimension
                     hovertemplate="Trajectory %{customdata}<br>Value: %{y}<extra></extra>",
@@ -229,7 +273,8 @@ def create_robot_array_plot(
 
     # Update y-axis properties for each subplot to maintain aspect ratio
     for i in range(n_dims):
-        fig.update_yaxes(row=i + 1, col=1, automargin=True)
+        fig.update_yaxes(row=i + 1, col=1, automargin=True, showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+        fig.update_xaxes(row=i + 1, col=1, showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
 
     return fig
 
@@ -239,6 +284,7 @@ def display_video_card(
     lazy_load: bool = False,
     key: str = "",
     extra_display_keys: list[str] | None = None,
+    show_info: bool = True,
 ) -> None:
     if not pd.isna(row["path"]):
         try:
@@ -246,11 +292,18 @@ def display_video_card(
                 row["dataset_filename"],
                 row["filename"],
             )
+            # Get dataset path from row or session state
+            dataset_path = None
+            if "path" in row and pd.notna(row["path"]):
+                dataset_path = row["path"]
+            elif "dataset_path" in st.session_state:
+                dataset_path = st.session_state.dataset_path
+            
             if not lazy_load:
-                st.video(get_video_mp4(dataset_filename, fname))
+                st.video(get_video_mp4(dataset_filename, fname, dataset_path=dataset_path))
             else:
                 # show placeholder image (along the same path), then button to load and play video
-                frame = get_video_frames(dataset_filename, fname, n_frames=1)[0]
+                frame = get_video_frames(dataset_filename, fname, n_frames=1, dataset_path=dataset_path)[0]
                 st.image(frame)
                 this_key = f"video_button_{row['id']}_{key}"
                 persist_key = f"video_button_persist_{row['id']}_{key}"
@@ -261,16 +314,18 @@ def display_video_card(
                 if st.button("Load Video", key=this_key):
                     st.session_state[persist_key] = True
                 if st.session_state[persist_key]:
-                    st.video(get_video_mp4(dataset_filename, fname))
+                    st.video(get_video_mp4(dataset_filename, fname, dataset_path=dataset_path))
 
-            st.write(f"**{row['id']}**")
-            task = row["task_language_instruction"]
-            st.write(f"Task: {task if task else '(No task recorded)' }")
-            st.write(f"Dataset: {row['dataset_formalname']}")
-            if extra_display_keys:
-                with st.expander("Extra Info", expanded=False):
-                    for key in extra_display_keys:
-                        st.write(f"**{key.replace('_', ' ').title()}**: {row[key]}")
+            # Only show info if show_info is True
+            if show_info:
+                st.write(f"**{row['id']}**")
+                task = row["task_language_instruction"]
+                st.write(f"Task: {task if task else '(No task recorded)' }")
+                st.write(f"Dataset: {row['dataset_formalname']}")
+                if extra_display_keys:
+                    with st.expander("Extra Info", expanded=False):
+                        for key in extra_display_keys:
+                            st.write(f"**{key.replace('_', ' ').title()}**: {row[key]}")
         except Exception as e:
             st.warning(f"Error loading video for {row['id']}: {e}")
     else:

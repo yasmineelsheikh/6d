@@ -6,7 +6,10 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from pathlib import Path
 
-import faiss
+try:
+    import faiss
+except ImportError:
+    faiss = None
 import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
@@ -201,12 +204,19 @@ class Index(ABC):
 class FaissIndex(Index):
     def __init__(self, feature_dim: int, time_steps: int, online_norm: bool = False):
         super().__init__(feature_dim, time_steps, online_norm)
-        base_index = faiss.IndexFlatL2(self.total_dim)
-        self.index = faiss.IndexIDMap2(base_index)
         self.id_map: dict[int, str] = {}
         self.next_id: int = 0
+        
+        if faiss is not None:
+            base_index = faiss.IndexFlatL2(self.total_dim)
+            self.index = faiss.IndexIDMap2(base_index)
+        else:
+            self.index = None
+            print("Warning: faiss not installed, embedding search will be limited to brute force or disabled.")
 
     def add_vector(self, vector: np.ndarray, entry_id: str) -> None:
+        if self.index is None:
+            return
         internal_id = self.next_id
         self.next_id += 1
         self.id_map[internal_id] = entry_id
@@ -216,6 +226,9 @@ class FaissIndex(Index):
     def search(
         self, query_vector: np.ndarray, k: int
     ) -> tuple[np.ndarray, list[str], np.ndarray]:
+        if self.index is None:
+            return np.array([]), [], np.array([])
+            
         distances, internal_indices = self.index.search(query_vector.reshape(1, -1), k)
         # -1 is the default value for faiss.IndexFlatL2 for no matches
         string_ids = [self.id_map[int(idx)] for idx in internal_indices[0] if idx != -1]
@@ -236,11 +249,14 @@ class FaissIndex(Index):
 
     def get_all_ids(self) -> np.ndarray:
         """Get all string IDs in the index, in the same order as get_all_vectors()"""
+        if self.index is None:
+            return np.array([])
         return np.array([self.id_map[i] for i in range(self.index.ntotal)])
 
     def save(self, path: Path) -> None:
         self.last_save_path = str(path)  # Track where we last saved
-        faiss.write_index(self.index, str(path))
+        if self.index is not None:
+            faiss.write_index(self.index, str(path))
         meta = {
             "feature_dim": self.feature_dim,
             "time_steps": self.time_steps,
@@ -258,7 +274,10 @@ class FaissIndex(Index):
             json.dump(meta, f, indent=2)
 
     def load(self, path: Path) -> None:
-        self.index = faiss.read_index(str(path))
+        if faiss is not None:
+            self.index = faiss.read_index(str(path))
+        else:
+            self.index = None
         meta_path = path.parent / f"{path.stem}_meta.json"
         if meta_path.exists():
             with meta_path.open() as f:
@@ -275,6 +294,8 @@ class FaissIndex(Index):
                     self.norm_stds = np.array(meta["norm_stds"])
 
     def get_all_vectors(self) -> np.ndarray:
+        if self.index is None:
+            return np.array([])
         return np.vstack([self.index.reconstruct(i) for i in range(self.index.ntotal)])
 
     def get_vector_by_id(self, entry_id: str) -> t.Optional[np.ndarray]:
@@ -289,13 +310,19 @@ class FaissIndex(Index):
         if internal_id is None:
             return None
 
+        if self.index is None:
+            return None
+
         return self.index.reconstruct(internal_id)
 
     def delete(self) -> None:
         """Delete the index from memory and remove associated files from disk"""
         # Reset in-memory state
-        base_index = faiss.IndexFlatL2(self.total_dim)
-        self.index = faiss.IndexIDMap2(base_index)
+        if faiss is not None:
+            base_index = faiss.IndexFlatL2(self.total_dim)
+            self.index = faiss.IndexIDMap2(base_index)
+        else:
+            self.index = None
         self.id_map = {}
         self.next_id = 0
         self.n_entries = 0
