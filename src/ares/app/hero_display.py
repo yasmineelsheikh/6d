@@ -42,7 +42,7 @@ def setup_zero_distance_checkbox_with_state() -> str:
 
 
 def display_hero_annotations(
-    db_data: dict, video_id: str, dataset: str, fname: str
+    db_data: dict, video_id: str, dataset: str, fname: str, dataset_path: str | None = None
 ) -> None:
     """
     Create a nice display of all the annotations in the database.
@@ -55,7 +55,7 @@ def display_hero_annotations(
     else:
         detection_data = annotation_data.get("detection")
         if detection_data:
-            draw_detection_data(detection_data, dataset, fname)
+            draw_detection_data(detection_data, dataset, fname, dataset_path=dataset_path)
 
         # show other top-level annotations (not frame-based)
         other_keys = [k for k in annotation_data.keys() if k != "detection"]
@@ -168,39 +168,58 @@ def show_hero_display(
         row["dataset_filename"],
         row["filename"],
     )
+    
+    # Get dataset path from row or session state
+    import streamlit as st
+    dataset_path = None
+    if "path" in row and pd.notna(row["path"]):
+        dataset_path = row["path"]
+    elif "dataset_path" in st.session_state:
+        dataset_path = st.session_state.dataset_path
 
-    col1, col2 = st.columns(2)
+    # Header with Task
+    if row.task_language_instruction:
+        st.markdown(f"### 🎯 {row.task_language_instruction}")
+
+    col1, col2 = st.columns([1.5, 1])
     with col1:
         # display the video
+        st.markdown("#### Video Playback")
         if lazy_load:
-            frame = get_video_frames(dataset, fname, n_frames=1)[0]
-            st.image(frame)
-            if st.button("Load Video"):
-                st.video(get_video_mp4(dataset, fname))
+            frame = get_video_frames(dataset, fname, n_frames=1, dataset_path=dataset_path)[0]
+            st.image(frame, use_column_width=True)
+            if st.button("Load Video", key="load_video_hero"):
+                st.video(get_video_mp4(dataset, fname, dataset_path=dataset_path))
         else:
-            st.video(get_video_mp4(dataset, fname))
+            st.video(get_video_mp4(dataset, fname, dataset_path=dataset_path))
+            
     with col2:
+        st.markdown("#### Episode Details")
         # display a few key pieces of information, e.g. task and success
-        if row.task_language_instruction:
-            st.write(f"**Task:** {row.task_language_instruction}")
-        if not np.isnan(row.task_success) and row.task_success:
-            st.write(f"**Success:** {row.task_success:.2f}")
-        if isinstance(row.trajectory_reward_step, str):
-            if int(row.trajectory_reward_step) >= 0:
-                st.write(
-                    f"**Reward Step:** {row.trajectory_reward_step} ({100*int(row.trajectory_reward_step) / int(row.length):.2f}% through rollout)"
-                )
+        
+        m1, m2 = st.columns(2)
+        with m1:
+            if not np.isnan(row.task_success):
+                st.metric("Success", f"{row.task_success:.2f}")
             else:
-                st.write(f"Failure episode!")
+                st.metric("Success", "N/A")
+        with m2:
+            if isinstance(row.trajectory_reward_step, str) and int(row.trajectory_reward_step) >= 0:
+                 st.metric("Reward Step", f"{row.trajectory_reward_step}")
+            else:
+                 st.metric("Reward Step", "N/A")
+
+        st.markdown("---")
+        
         # optionally display the rest of the row details as a truncated json
-        with st.expander("Row Details", expanded=False):
+        with st.expander("Full Row Metadata", expanded=False):
             json_repr = {
                 k: (v if len(str(v)) < 1000 else str(v)[:1000] + "...")
                 for k, v in sorted(row.to_dict().items(), key=lambda x: x[0])
             }
             st.json(json_repr, expanded=False)
 
-        if st.button("Generate Robot Array Plots", key="robot_array_plots_button_hero"):
+        if st.button("Generate Robot Array Plots", key="robot_array_plots_button_hero", use_container_width=True):
             array_figs = generate_robot_array_plot_visualizations(
                 row, all_vecs, traj_array_show_n, highlight_row=True
             )
@@ -213,7 +232,7 @@ def show_hero_display(
             video_id = get_video_id(dataset, fname)
             db_data = get_video_annotation_data(video_id)
             if db_data is not None:
-                display_hero_annotations(db_data, video_id, dataset, fname)
+                display_hero_annotations(db_data, video_id, dataset, fname, dataset_path=dataset_path)
             else:
                 st.warning(f"No video or annotation data found for {video_id}")
         except Exception as e:

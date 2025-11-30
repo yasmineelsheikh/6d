@@ -231,8 +231,8 @@ def create_structured_data_filters(
         print("\nFinal df shape:", filtered_df.shape)
 
     if len(filtered_df) == 0:
-        print(f"No rows left after filtering: {skipped_cols}")
-        raise ValueError(f"No rows left after filtering: {skipped_cols}")
+        print(f"Warning: No rows left after filtering: {skipped_cols}")
+        # raise ValueError(f"No rows left after filtering: {skipped_cols}")
     return filtered_df, skipped_cols
 
 

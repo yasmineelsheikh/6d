@@ -167,10 +167,10 @@ def draw_annotations(
     return canvas
 
 
-def draw_detection_data(detection_data: dict, dataset: str, fname: str) -> None:
+def draw_detection_data(detection_data: dict, dataset: str, fname: str, dataset_path: str | None = None) -> None:
     # given detection data, lets display the frames and annotations
     frame_inds = list(detection_data.keys())
-    all_frame_paths = get_video_frames(dataset, fname, n_frames=None, just_path=True)
+    all_frame_paths = get_video_frames(dataset, fname, n_frames=None, just_path=True, dataset_path=dataset_path)
     selected_frames = choose_and_preprocess_frames(
         all_frame_paths,
         specified_frames=frame_inds,

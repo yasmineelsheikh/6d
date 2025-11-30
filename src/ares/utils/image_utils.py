@@ -90,6 +90,7 @@ def get_video_frames(
     filename: str,
     n_frames: int | None = None,
     just_path: bool = False,
+    dataset_path: str | None = None,
 ) -> list[np.ndarray | str]:
     """Get video as a list of frames from the frames directory."""
 
@@ -109,11 +110,29 @@ def get_video_frames(
     return frames
 
 
-def get_video_mp4(dataset_filename: str, filename: str) -> str:
-    """Get path to the MP4 video file."""
+def get_video_mp4(dataset_filename: str, filename: str, dataset_path: str | None = None) -> str:
+    """Get path to the MP4 video file.
+    
+    Args:
+        dataset_filename: Name of the dataset
+        filename: Name of the video file (without .mp4 extension)
+        dataset_path: Optional path to the dataset directory. If provided, looks in 
+                     dataset_path/videos/episode_videos/ first.
+    
+    Returns:
+        Path to the MP4 video file
+    """
     if not filename.endswith(".mp4"):
         filename += ".mp4"
     filename = filename.lstrip("/")
+    
+    # First, try looking in the dataset directory's videos/episode_videos folder
+    if dataset_path:
+        episode_video_path = os.path.join(dataset_path, "videos", "episode_videos", filename)
+        if os.path.exists(episode_video_path):
+            return episode_video_path
+    
+    # Fall back to the original location
     mp4_path = os.path.join(ARES_VIDEO_DIR, dataset_filename, filename)
     if not os.path.exists(mp4_path):
         raise FileNotFoundError(f"MP4 file not found: {mp4_path}")
