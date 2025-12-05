@@ -1,0 +1,63 @@
+# Dockerfile for RunPod serverless deployment of Cosmos handler
+# Based on: https://docs.runpod.io/serverless/workers/deploy
+# Follows Cosmos setup guide: https://github.com/nvidia-cosmos/cosmos-transfer2.5/blob/main/docs/setup.md
+
+ARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+FROM ${BASE_IMAGE}
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies (as per Cosmos setup guide)
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        ffmpeg \
+        git \
+        git-lfs \
+        tree \
+        wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Initialize git lfs (required for Cosmos checkpoints)
+RUN git lfs install
+
+# Install uv: https://docs.astral.sh/uv/getting-started/installation/
+# Use pre-built uv image for better reliability (as per official Cosmos Dockerfile)
+COPY --from=ghcr.io/astral-sh/uv:0.8.12 /uv /uvx /usr/local/bin/
+ENV UV_LINK_MODE=copy
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy Cosmos-Transfer2.5 repository
+# Note: This assumes cosmos-transfer2.5 is in the build context
+COPY cosmos-transfer2.5 /workspace/cosmos-transfer2.5
+
+# Install Cosmos dependencies using uv (as per setup guide)
+WORKDIR /workspace/cosmos-transfer2.5
+ARG CUDA_NAME=cu128
+ENV CUDA_NAME=${CUDA_NAME}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --extra=${CUDA_NAME} --system || \
+    uv sync --extra=${CUDA_NAME}
+
+# Install RunPod handler dependencies
+# Use uv to install runpod in the same environment
+WORKDIR /workspace
+RUN uv pip install runpod>=1.7.6 || \
+    /workspace/cosmos-transfer2.5/.venv/bin/pip install runpod>=1.7.6
+
+# Copy handler code
+COPY src/cosmos_handler.py /workspace/handler.py
+
+# Set environment variables for Cosmos
+ENV COSMOS_DIR=/workspace/cosmos-transfer2.5
+ENV PATH="/workspace/cosmos-transfer2.5/.venv/bin:$PATH"
+
+# Command to run when container starts
+CMD ["python", "-u", "/workspace/handler.py"]

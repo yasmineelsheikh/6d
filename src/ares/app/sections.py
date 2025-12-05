@@ -101,19 +101,83 @@ def embedding_data_filters_section(
 
 
 def data_distributions_section(filtered_df: pd.DataFrame) -> list[dict]:
-    max_x_bar_options = 100
-    # Create overview of all data
-    # st.header("Distribution Analytics")
-    general_visualizations = generate_automatic_visualizations(
-        filtered_df,
-        time_column="ingestion_time",
-        max_x_bar_options=max_x_bar_options,
+    """Show dataset distribution with only Environment and Trajectory tabs."""
+    import plotly.graph_objects as go
+    import numpy as np
+    
+    # Create placeholder visualizations
+    placeholder_visualizations = []
+    
+    # Environment placeholder - scatter plot
+    env_fig = go.Figure()
+    # Generate random scatter points
+    np.random.seed(42)
+    
+    # Combine all points into a single trace without labels or colors
+    x_vals = np.concatenate([np.random.randn(20) + np.random.uniform(-2, 2) for _ in range(4)])
+    y_vals = np.concatenate([np.random.randn(20) + np.random.uniform(-2, 2) for _ in range(4)])
+    
+    env_fig.add_trace(go.Scatter(
+        x=x_vals,
+        y=y_vals,
+        mode='markers',
+        marker=dict(size=8, opacity=0.7),
+        showlegend=False
+    ))
+    
+    env_fig.update_layout(
+        title='',
+        xaxis_title='',
+        yaxis_title='',
+        height=400,
+        showlegend=False
     )
-    general_visualizations = sorted(general_visualizations, key=lambda x: x["title"])
+    placeholder_visualizations.append({
+        "title": "Environment",
+        "figure": env_fig
+    })
+    
+    # Trajectory placeholder - multiple irregular lines
+    traj_fig = go.Figure()
+    np.random.seed(42)
+    
+    # Generate multiple irregular trajectory lines
+    num_trajectories = 15
+    for i in range(num_trajectories):
+        # Create irregular trajectory with varying lengths
+        length = np.random.randint(20, 80)
+        x_vals = np.arange(length)
+        # Create irregular y values with some noise and trends
+        y_vals = np.cumsum(np.random.randn(length) * 0.5) + np.sin(x_vals / 5) * 2 + np.random.randn(length) * 0.3
+        
+        traj_fig.add_trace(go.Scatter(
+            x=x_vals,
+            y=y_vals,
+            mode='lines',
+            line=dict(width=1.5),
+            opacity=0.6,
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+    
+    traj_fig.update_layout(
+        title='',
+        xaxis_title='',
+        yaxis_title='',
+        height=400
+    )
+    placeholder_visualizations.append({
+        "title": "Trajectory",
+        "figure": traj_fig
+    })
+    
+    # Create tabs with the two visualizations
     create_tabbed_visualizations(
-        general_visualizations, [viz["title"] for viz in general_visualizations]
+        placeholder_visualizations, 
+        ["Environment", "Trajectory"]
     )
-    return general_visualizations
+    
+    return placeholder_visualizations
 
 
 def success_rate_analytics_section(filtered_df: pd.DataFrame) -> list[dict]:

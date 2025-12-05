@@ -6,6 +6,7 @@ state management, error handling, timing, and data export functionality.
 import json
 import os
 import shutil
+import boto3
 import tarfile
 import tempfile
 import time
@@ -19,6 +20,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+import requests
 
 load_dotenv()
 
@@ -44,32 +46,52 @@ title = "6d labs"
 tmp_dump_dir = os.path.join(ARES_DATA_DIR, "webapp_tmp")
 section_times: dict[str, float] = defaultdict(float)
 
+# ---------- Pod API Config ----------
+POD_API_URL = "https://g6hxoyusgab5l4-8000.proxy.runpod.net/run-json"  # Replace <pod-ip> with your pod's IP address
+
+S3_BUCKET = "6d-temp-storage"
+S3_REGION = "us-west-2"
+s3 = boto3.client("s3", region_name=S3_REGION)
+
+def upload_folder_to_s3(local_folder_path, bucket_name, s3_prefix='') -> str:
+    """
+    Uploads a local folder and its contents to an S3 bucket.
+
+    Args:
+        local_folder_path (str): The path to the local folder to upload.
+        bucket_name (str): The name of the S3 bucket.
+        s3_prefix (str): The S3 prefix (folder) to upload into. 
+                         Defaults to an empty string for the bucket root.
+    """
+    for root, dirs, files in os.walk(local_folder_path):
+        for file in files:
+            local_file_path = os.path.join(root, file)
+            
+            # Construct the S3 key, maintaining the folder structure
+            relative_path = os.path.relpath(local_file_path, local_folder_path)
+            s3_key = os.path.join(s3_prefix, relative_path).replace("\\", "/")  # Ensure forward slashes for S3 keys
+
+            print(f"Uploading {local_file_path} to s3://{bucket_name}/{s3_key}")
+            try:
+                s3.upload_file(local_file_path, bucket_name, s3_key)
+            except Exception as e:
+                print(f"Error uploading {local_file_path}: {e}")
 
 ######################################################################
 # Context managers for error handling and timing
-# - `error_context` is used to catch errors in computation and render the error in the app
-# - `timer_context` is used to time the execution of a section and print the timing to the console
 ######################################################################
 @contextmanager
 def error_context(section_name: str) -> t.Any:
-    """
-    Context manager for gracefully handling errors in computation of a section.
-    Catch the error and render it in the app for easy debugging and readability.
-    """
     print(section_name)
     try:
         yield
     except Exception as e:
-        st.error(f"Error in {section_name}: {str(e)}\\n{traceback.format_exc()}")
-        st.write("Stopping execution")
+        st.error(f"Error in {section_name}: {str(e)}")
         st.stop()
 
 
 @contextmanager
 def timer_context(section_name: str) -> t.Any:
-    """
-    Context manager for timing sections, helpful for debugging and performance analysis.
-    """
     start_time = time.time()
     try:
         yield
@@ -78,15 +100,30 @@ def timer_context(section_name: str) -> t.Any:
         section_times[section_name] += elapsed_time
 
 
-# Main function defining the order of the streamlit subsections
-# Note: streamlit displays standalone-strings like `"""..."""` as markdown!
-# Use `#` for comments in the streamlit context.
+# ---------- Helper function to call pod ----------
+def run_cosmos_on_pod(json_file_path: str) -> str:
+    """
+    Send JSON file to the pod and return the S3 URL of the output video.
+    """
+    with open(json_file_path, "r") as f:
+        data = json.load(f)
+    
+    response = requests.post(POD_API_URL, json={"json_file_content": data})
+    response.raise_for_status()
+    
+    s3_url = response.json().get("s3_url")
+    if not s3_url:
+        raise RuntimeError("Pod did not return an S3 URL")
+    
+    return s3_url
+
+
+# ---------- Main Streamlit App ----------
 def main() -> None:
     st.set_page_config(page_title=title, page_icon="📊", layout="wide")
     
     # Initialize session state for workflow management
     if "workflow_stage" not in st.session_state:
-        # Check if database already has data
         from ares.databases.structured_database import setup_database, RolloutSQLModel
         from sqlalchemy import select
         
@@ -94,14 +131,11 @@ def main() -> None:
             engine = setup_database(RolloutSQLModel, path=ROBOT_DB_PATH)
             query = select(RolloutSQLModel)
             df = pd.read_sql(query, engine)
-            
-            # If data exists, go directly to dashboard
             if len(df) > 0:
                 st.session_state.workflow_stage = "dashboard"
             else:
-                st.session_state.workflow_stage = "dashboard"  # Always show dashboard now
+                st.session_state.workflow_stage = "dashboard"
         except:
-            # If database doesn't exist or error, show dashboard anyway
             st.session_state.workflow_stage = "dashboard"
             
     if "ingestion_complete" not in st.session_state:
@@ -109,18 +143,11 @@ def main() -> None:
     if "uploaded_files" not in st.session_state:
         st.session_state.uploaded_files = []
     
-    # Always show dashboard (removed upload page workflow)
+    # Always show dashboard
     show_dashboard_page()
 
 
 def process_local_dataset(dataset_path_str: str, dataset_name: str) -> None:
-    """
-    Process a local LeRobot dataset directory.
-    
-    Args:
-        dataset_path_str: Absolute path to the dataset directory
-        dataset_name: Name for the dataset
-    """
     try:
         dataset_path = Path(dataset_path_str)
         if not dataset_path.exists():
@@ -131,10 +158,8 @@ def process_local_dataset(dataset_path_str: str, dataset_name: str) -> None:
             st.error("Invalid LeRobot dataset structure. Directory must contain 'data/' and 'meta/' folders.")
             return
             
-        # Run ingestion pipeline
-        with st.spinner("🔄 Processing dataset... This may take a few minutes."):
+        with st.spinner("Processing dataset... This may take a few minutes."):
             try:
-                # Import ingestion function
                 import sys
                 current_file = Path(__file__).resolve()
                 project_root = current_file.parent.parent.parent.parent
@@ -147,39 +172,22 @@ def process_local_dataset(dataset_path_str: str, dataset_name: str) -> None:
                 engine_url = ROBOT_DB_PATH
                 count = ingest_dataset(str(dataset_path), engine_url, dataset_name)
                 
-                st.success(f"Dataset processing complete! Ingested {count} episodes.")
-                st.balloons()
                 
-                # Switch to dashboard view and refresh
                 st.session_state.dataset_uploaded = True
                 st.session_state.current_dataset = dataset_name
-                st.session_state.dataset_path = str(dataset_path)  # Store dataset path for reading info.json
+                st.session_state.dataset_path = str(dataset_path)
                 st.session_state.active_tab = "original"
                 
-                # Force rerun to show updated dashboard
                 st.rerun()
                 
             except Exception as e:
                 st.error(f"Error during ingestion: {str(e)}")
-                import traceback
-                st.error(f"Traceback: {traceback.format_exc()}")
                 
     except Exception as e:
         st.error(f"Error processing dataset: {str(e)}")
-        import traceback
-        st.error(f"Traceback: {traceback.format_exc()}")
 
 
 def load_dataset_info(dataset_path: str) -> dict | None:
-    """
-    Load dataset information from meta/info.json file.
-    
-    Args:
-        dataset_path: Path to the dataset directory
-        
-    Returns:
-        Dictionary with dataset info or None if file doesn't exist
-    """
     try:
         info_path = Path(dataset_path) / "meta" / "info.json"
         if info_path.exists():
@@ -191,9 +199,6 @@ def load_dataset_info(dataset_path: str) -> dict | None:
 
 
 def show_dashboard_page() -> None:
-    """Display the main analytics dashboard."""
-    
-    # Title in left corner - smaller size
     st.markdown(
         """
         <div style='position: fixed; top: 10px; left: 20px; z-index: 999;'>
@@ -203,9 +208,6 @@ def show_dashboard_page() -> None:
         unsafe_allow_html=True
     )
     
-    ######################################################################
-    # Top Upload Bar
-    ######################################################################
     st.markdown("### Upload Data")
     
     col1, col2, col3 = st.columns([3, 1, 1])
@@ -236,12 +238,7 @@ def show_dashboard_page() -> None:
     if upload_button and dataset_path_input and dataset_name:
         process_local_dataset(dataset_path_input, dataset_name)
     
-    
-    ######################################################################
     # Original / Curated Tabs
-    ######################################################################
-    
-    # Auto-select Original tab after upload
     if 'active_tab' not in st.session_state:
         st.session_state.active_tab = "original"
     
@@ -250,63 +247,40 @@ def show_dashboard_page() -> None:
     with tab_original:
         st.markdown("### Dataset Overview")
         
-        # Only load and show data if user uploaded a dataset in this session
-        df = pd.DataFrame()  # Initialize empty dataframe
+        df = pd.DataFrame()
         if 'current_dataset' in st.session_state and st.session_state.current_dataset:
             try:
-                # Only load data for the current session's dataset
                 section_loading = "loading data"
                 with error_context(section_loading), timer_context(section_loading):
                     df = loading_data_section(title, tmp_dump_dir)
-                
-                # Filter to only show the current session's dataset (ignore all other data)
                 if 'dataset_formalname' in df.columns:
                     df = df[df['dataset_formalname'] == st.session_state.current_dataset]
                 elif 'dataset_name' in df.columns:
                     df = df[df['dataset_name'] == st.session_state.current_dataset]
             except Exception:
-                # Error loading - use empty dataframe
                 df = pd.DataFrame()
         
-        if len(df) == 0:
-            pass  # Empty UI when no data - only section title is shown
-        else:
-            # Show all the ARES analysis content for single dataset
-            
-            # Load dataset info from meta/info.json
+        if len(df) > 0:
             dataset_info = None
             if 'dataset_path' in st.session_state and st.session_state.dataset_path:
                 dataset_info = load_dataset_info(st.session_state.dataset_path)
             
-            # Top Metrics Row - use info.json data if available, otherwise fall back to dataframe
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2 = st.columns(2)
             with col1:
                 if dataset_info and 'total_episodes' in dataset_info:
                     st.metric("Total Episodes", dataset_info['total_episodes'])
                 else:
                     st.metric("Total Episodes", len(df))
             with col2:
-                if dataset_info and 'total_frames' in dataset_info:
-                    st.metric("Total Frames", f"{dataset_info['total_frames']:,}")
-                else:
-                    total_frames = df['length'].sum() if 'length' in df.columns else 0
-                    st.metric("Total Frames", f"{total_frames:,}")
-            with col3:
                 if dataset_info and 'robot_type' in dataset_info:
                     st.metric("Robot Type", dataset_info['robot_type'].replace('_', ' ').title())
                 elif 'robot_embodiment' in df.columns and len(df) > 0:
                     st.metric("Robot Type", df['robot_embodiment'].iloc[0])
                 else:
                     st.metric("Robot Type", "N/A")
-            with col4:
-                if dataset_info and 'fps' in dataset_info:
-                    st.metric("FPS", f"{dataset_info['fps']:.1f}")
-                else:
-                    st.metric("FPS", "N/A")
             
             st.markdown("---")
             
-            # Dataset Distribution
             st.subheader("Dataset Distribution")
             section_display = "data distributions"
             with error_context(section_display), timer_context(section_display):
@@ -314,178 +288,147 @@ def show_dashboard_page() -> None:
             
             st.markdown("---")
             
-            # Episode Grid
             st.subheader("Episode Preview")
             section_video_grid = "video grid"
             with error_context(section_video_grid), timer_context(section_video_grid):
                 video_grid_section(df)
         
-        # Action Buttons at bottom of Original tab
         st.markdown("---")
         st.markdown("### Dataset Processing")
         
-        # Only show processing buttons when data exists
         if len(df) > 0:
-            col1, col2, col3 = st.columns(3)
+            tab_augmentation, tab_optimisation = st.tabs(["Augmentation", "Optimisation"])
             
-            with col1:
-                if st.button("Run Augmentation", width="stretch", type="secondary"):
+            with tab_augmentation:
+                text_input = st.text_input("Enter description")
+                st.markdown("---")
+                
+            if st.button("Execute", key="execute_augmentation", type="primary", use_container_width=True):
+                if text_input and st.session_state.get("current_dataset") and st.session_state.get("dataset_path"):
                     with st.spinner("Running data augmentation..."):
-                        from ares.augmentation import CosmosAugmentor
+                        import tempfile
+                        import json
+                        import os
+                        import sys
                         
-                        # Initialize augmentor
-                        augmentor = CosmosAugmentor()
+                        # Add project root to path for imports
+                        current_file = Path(__file__).resolve()
+                        project_root = current_file.parent.parent.parent.parent
+                        if str(project_root) not in sys.path:
+                            sys.path.insert(0, str(project_root))
                         
-                        # Get current dataset
-                        # Assuming df is available in the scope or we need to reload it
-                        # The df variable is defined in the outer scope (tab_original context)
-                        # But to be safe, let's access it from session state if possible, or use the local df
+                        from scripts.get_prompt import get_prompt
                         
-                        # Create a place to store new episodes
-                        new_episodes = []
-                        
-                        # Iterate through a subset of the dataframe for demo purposes (e.g., first 5 episodes)
-                        # In a real app, we might want to augment the whole dataset or a selection
-                        episodes_to_augment = df.head(5)
-                        
-                        # Create output directory for augmented videos
-                        output_dir = os.path.join(tmp_dump_dir, "augmented_videos")
-                        os.makedirs(output_dir, exist_ok=True)
-                        
-                        progress_bar = st.progress(0)
-                        for idx, (i, row) in enumerate(episodes_to_augment.iterrows()):
-                            augmented_variants = augmentor.augment_episode(row, Path(output_dir))
-                            new_episodes.extend(augmented_variants)
-                            progress_bar.progress((idx + 1) / len(episodes_to_augment))
-                        
-                        if new_episodes:
-                            # Convert new episodes to DataFrame
-                            new_df = pd.DataFrame(new_episodes)
+                        dataset_name = st.session_state.get("current_dataset", "unknown")
+                        dataset_path = st.session_state.get("dataset_path", "unknown")
+                        try:
+                            upload_folder_to_s3(dataset_path, S3_BUCKET, f"input_data/{dataset_name}")
+
+                            prompt_path = get_prompt(text_input)
+                            s3.upload_file(prompt_path, S3_BUCKET, f"input_data/{dataset_name}/prompt.txt")
+
+                            # Call pod API
+                            st.info("Starting Cosmos inference on pod...")
+                            response = requests.post(
+                                POD_API_URL,
+                                json={"dataset_name": dataset_name},
+                                timeout=3600  # 1 hour timeout for long-running inference
+                            )
+                            response.raise_for_status()
                             
-                            # Append to existing dataframe in session state or re-ingest
-                            # For this demo, we'll append to the in-memory dataframe and update session state
+                            result = response.json()
+                            s3_output_url = result.get("s3_url")
                             
-                            # Concatenate
-                            augmented_df = pd.concat([df, new_df], ignore_index=True)
+                            if not s3_output_url:
+                                raise RuntimeError("Pod did not return an S3 URL")
                             
-                            # Update the display dataframe
-                            # Note: This updates the local variable 'df', but we might need to update 
-                            # where it's stored to persist it across reruns if not saved to DB.
-                            # For now, let's update session state if used there, or just show success.
+                            st.success("Cosmos processing complete!")
+                            st.info(f"Output video uploaded to S3:\n{s3_output_url}")
                             
-                            st.session_state.curated_dataset = augmented_df
-                            st.success(f"Augmentation complete! Generated {len(new_episodes)} new episodes.")
-                        else:
-                            st.warning("No episodes were augmented (check video paths).")
+                            # Populate curated dataset with original dataset
+                            if 'current_dataset' in st.session_state:
+                                try:
+                                    section_loading = "loading data"
+                                    with error_context(section_loading), timer_context(section_loading):
+                                        curated_df = loading_data_section(title, tmp_dump_dir)
+                                    if 'dataset_formalname' in curated_df.columns:
+                                        curated_df = curated_df[curated_df['dataset_formalname'] == st.session_state.current_dataset]
+                                    elif 'dataset_name' in curated_df.columns:
+                                        curated_df = curated_df[curated_df['dataset_name'] == st.session_state.current_dataset]
+                                    st.session_state.curated_dataset = curated_df.copy()
+                                    st.rerun()  # Refresh to show curated section
+                                except Exception as e:
+                                    st.warning(f"Could not load dataset for curated view: {e}")
+
+                        except Exception as e:
+                            st.error(f"Error running augmentation: {str(e)}")
+                else:
+                    st.warning("Please fill in all fields before executing.")
             
-            with col2:
-                if st.button("Run Optimisation", width="stretch", type="secondary"):
+            with tab_optimisation:
+                st.info("Configure optimisation parameters here.")
+                st.markdown("---")
+                if st.button("Execute", key="execute_optimisation", type="primary", use_container_width=True):
                     with st.spinner("Running dataset optimisation..."):
                         import time
                         time.sleep(2)
                     st.success("Optimisation complete!")
-            
-            with col3:
-                if st.button("Run Both", width="stretch", type="primary"):
-                    with st.spinner("Running augmentation and optimisation..."):
-                        import time
-                        time.sleep(3)
-                    st.success("Both processes complete!")
-                    # Create a curated dataset for demo
-                    st.session_state.curated_dataset = df.copy()
     
     with tab_curated:
         st.markdown("### Curated Dataset")
         
-        # Only load and show data if user uploaded a dataset in this session
-        df = pd.DataFrame()  # Initialize empty dataframe
-        if 'current_dataset' in st.session_state and st.session_state.current_dataset:
-            try:
-                # Only load data for the current session's dataset
-                section_loading = "loading data"
-                with error_context(section_loading), timer_context(section_loading):
-                    df = loading_data_section(title, tmp_dump_dir)
-                
-                # Filter to only show the current session's dataset (ignore all other data)
-                if 'dataset_formalname' in df.columns:
-                    df = df[df['dataset_formalname'] == st.session_state.current_dataset]
-                elif 'dataset_name' in df.columns:
-                    df = df[df['dataset_name'] == st.session_state.current_dataset]
-            except Exception:
-                # Error loading - use empty dataframe
-                df = pd.DataFrame()
+        if 'curated_dataset' in st.session_state and len(st.session_state.curated_dataset) > 0:
+            curated_df = st.session_state.curated_dataset
+            
+            # Show same metrics as original
+            dataset_info = None
+            if 'dataset_path' in st.session_state and st.session_state.dataset_path:
+                dataset_info = load_dataset_info(st.session_state.dataset_path)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if dataset_info and 'total_episodes' in dataset_info:
+                    st.metric("Total Episodes", dataset_info['total_episodes'])
+                else:
+                    st.metric("Total Episodes", len(curated_df))
+            with col2:
+                if dataset_info and 'robot_type' in dataset_info:
+                    st.metric("Robot Type", dataset_info['robot_type'].replace('_', ' ').title())
+                elif 'robot_embodiment' in curated_df.columns and len(curated_df) > 0:
+                    st.metric("Robot Type", curated_df['robot_embodiment'].iloc[0])
+                else:
+                    st.metric("Robot Type", "N/A")
+            
+            st.markdown("---")
+            
+            st.subheader("Dataset Distribution")
+            section_display = "data distributions"
+            with error_context(section_display), timer_context(section_display):
+                data_distributions_section(curated_df)
+            
+            st.markdown("---")
+            
+            st.subheader("Episode Preview")
+            section_video_grid = "video grid"
+            with error_context(section_video_grid), timer_context(section_video_grid):
+                video_grid_section(curated_df)
+        else:
+            st.info("No curated dataset available. Run augmentation to generate curated data.")
         
-        # Only show content if data exists
-        if len(df) > 0:
-            if 'curated_dataset' in st.session_state:
-                curated_df = st.session_state.curated_dataset
-                
-                # Show curated dataset metrics
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Curated Episodes", len(curated_df))
-                with col2:
-                    if 'task_success' in curated_df.columns:
-                        success_rate = curated_df['task_success'].mean() * 100
-                        st.metric("Success Rate", f"{success_rate:.1f}%")
-                with col3:
-                    if 'length' in curated_df.columns:
-                        avg_len = curated_df['length'].mean()
-                        st.metric("Avg Length", f"{avg_len:.0f}")
-                with col4:
-                    # Calculate improvement
-                    if 'current_dataset' in st.session_state and st.session_state.current_dataset:
-                        section_loading = "loading data"
-                        with error_context(section_loading), timer_context(section_loading):
-                            original_df = loading_data_section(title, tmp_dump_dir)
-                        # Filter to only current session's dataset
-                        if 'dataset_formalname' in original_df.columns:
-                            original_df = original_df[original_df['dataset_formalname'] == st.session_state.current_dataset]
-                        elif 'dataset_name' in original_df.columns:
-                            original_df = original_df[original_df['dataset_name'] == st.session_state.current_dataset]
-                        if len(original_df) > 0:
-                            reduction = (1 - len(curated_df) / len(original_df)) * 100
-                            st.metric("Size Reduction", f"{reduction:.1f}%")
-                    else:
-                        st.metric("Size Reduction", "N/A")
-                
-                st.markdown("---")
-                
-                # Show curated dataset preview
-                st.subheader("Curated Dataset Preview")
-                st.dataframe(curated_df.head(20), width="stretch")
-        
-        # Export section title always shown, content only when data exists
         st.markdown("---")
         st.markdown("### Export Dataset")
-        
-        # Only show export content if data exists
-        if len(df) > 0:
-            # Only show export button if curated dataset exists
-            if 'curated_dataset' in st.session_state:
-                col1, col2, col3 = st.columns([1, 1, 1])
-                
-                with col2:
-                    export_button = st.button(
-                        "Export Curated Dataset",
-                        width="stretch",
-                        type="primary",
-                        disabled='curated_dataset' not in st.session_state
-                    )
-                    
-                    if export_button and 'curated_dataset' in st.session_state:
-                        curated_df = st.session_state.curated_dataset
-                        
-                        # Create download
-                        csv = curated_df.to_csv(index=False)
-                        st.download_button(
-                            label="Download as CSV",
-                            data=csv,
-                            file_name="curated_dataset.csv",
-                            mime="text/csv",
-                            width="stretch"
-                        )
-                        st.success("Dataset ready for export!")
+        if 'curated_dataset' in st.session_state and len(st.session_state.curated_dataset) > 0:
+            curated_df = st.session_state.curated_dataset
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col2:
+                csv = curated_df.to_csv(index=False)
+                st.download_button(
+                    label="Download as CSV",
+                    data=csv,
+                    file_name="curated_dataset.csv",
+                    mime="text/csv",
+                    width="stretch"
+                )
 
 
 if __name__ == "__main__":

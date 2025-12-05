@@ -1,0 +1,1 @@
+{"name": "stack_cups", "prompt_path": "/Users/mac/demo/ares-platform/prompt.txt", "video_path": "/Users/mac/Downloads/open_droids_data/stack_the_cups_lerobot_v3/videos", "guidance": 3, "edge": {"control_weight": 0.5}, "vis": {"control_weight": 0.2}}

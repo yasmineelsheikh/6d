@@ -163,14 +163,22 @@ def initialize_data(tmp_dump_dir: str) -> None:
     print("Setting up models")
     st.session_state.models = dict()
     st.session_state.models["summarizer"] = VLM(provider="openai", name="gpt-4o-mini")
-    print("Setting up annotations database")
-    st.session_state.annotations_db = AnnotationDatabase(
-        connection_string=ANNOTATION_DB_PATH
-    )
-    print("Getting annotations database stats")
-    st.session_state.annotation_db_stats = (
-        st.session_state.annotations_db.get_database_stats()
-    )
+
+    # Annotations database is optional in local/dev setups; handle failures gracefully.
+    try:
+        print("Setting up annotations database")
+        st.session_state.annotations_db = AnnotationDatabase(
+            connection_string=ANNOTATION_DB_PATH
+        )
+        print("Getting annotations database stats")
+        st.session_state.annotation_db_stats = (
+            st.session_state.annotations_db.get_database_stats()
+        )
+    except Exception as e:
+        # If MongoDB is not running or not reachable, continue without annotations.
+        print(f"Warning: could not connect to AnnotationDatabase at {ANNOTATION_DB_PATH}: {e}")
+        st.session_state.annotations_db = None
+        st.session_state.annotation_db_stats = {}
 
 
 def display_state_info() -> None:

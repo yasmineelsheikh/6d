@@ -53,10 +53,29 @@ def build_dataset(
     dataset_name: str, data_dir: str
 ) -> tuple[tfds.builder, tfds.datasets]:
     """Build and prepare the dataset."""
-    builder = tfds.builder(dataset_name, data_dir=data_dir)
-    builder.download_and_prepare()
-    dataset_dict = builder.as_dataset()
-    return builder, dataset_dict
+    # Check if data directory exists
+    if not os.path.exists(data_dir):
+        raise FileNotFoundError(
+            f"Data directory does not exist: {data_dir}\n"
+            f"Please create it and download datasets using oxe-downloader:\n"
+            f"  mkdir -p {data_dir}\n"
+            f"  oxe-download --dataset \"{dataset_name}\" --path {data_dir}"
+        )
+    
+    try:
+        builder = tfds.builder(dataset_name, data_dir=data_dir)
+        builder.download_and_prepare()
+        dataset_dict = builder.as_dataset()
+        return builder, dataset_dict
+    except Exception as e:
+        if "not found" in str(e).lower() or "DatasetNotFoundError" in str(type(e)):
+            raise FileNotFoundError(
+                f"Dataset '{dataset_name}' not found in {data_dir}\n"
+                f"This dataset needs to be downloaded first using oxe-downloader:\n"
+                f"  oxe-download --dataset \"{dataset_name}\" --path {data_dir}\n"
+                f"Original error: {e}"
+            ) from e
+        raise
 
 
 def maybe_save_video(episode: OpenXEmbodimentEpisode, dataset_filename: str) -> None:
