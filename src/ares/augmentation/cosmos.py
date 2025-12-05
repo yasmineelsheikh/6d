@@ -317,8 +317,8 @@ class CosmosAugmentor:
                 lines = [line.strip() for line in response_text.split('\n') if line.strip()]
                 variations = [line for line in lines if len(line) > 20][:num_variations]
                 if len(variations) >= num_variations:
-                    return variations
-            
+        return variations
+
             # Fallback: generate simple variations
             logger.warning("Could not parse LLM response, using fallback variations")
             return [f"{caption} [Variation {i+1}]" for i in range(num_variations)]
@@ -422,15 +422,15 @@ class CosmosAugmentor:
         
         # Fallback: Copy original video as placeholder
         logger.warning("Cosmos not available, using original video as placeholder")
-        try:
-            import shutil
+            try:
+                import shutil
             if os.path.exists(original_video_path):
                 shutil.copy(original_video_path, output_path)
                 logger.info(f"Copied original video to {output_path} (placeholder)")
             else:
                 raise FileNotFoundError(f"Original video not found: {original_video_path}")
-        except Exception as e:
-            logger.error(f"Failed to copy video: {e}")
+            except Exception as e:
+                logger.error(f"Failed to copy video: {e}")
             raise
     
     def _try_cosmos_direct(
@@ -540,7 +540,7 @@ class CosmosAugmentor:
                     shutil.move(str(latest_file), str(output_path))
                     logger.info(f"Successfully generated video using Cosmos: {output_path}")
                     return True
-                else:
+        else:
                     logger.warning("Cosmos generated video but output file not found")
                     return False
                     
