@@ -78,11 +78,24 @@ def generate_automatic_visualizations(
     """
     ignore_cols = ignore_cols or IGNORE_COLS
     visualizations = []
+    
+    # Only include these specific columns for data distribution visualizations
+    allowed_columns = [
+        "environment_distractor_objects_estimate",
+        "environment_lighting_estimate",
+        "environment_surface_estimate",
+    ]
+    
+    # Filter to only allowed columns that exist in the dataframe
+    available_columns = [col for col in allowed_columns if col in df.columns]
+    
+    if not available_columns:
+        return []
 
-    # Pre-calculate visualization types for all columns at once
+    # Pre-calculate visualization types for allowed columns only
     viz_infos = {
         col: infer_visualization_type(col, df)
-        for col in sorted(df.columns)
+        for col in sorted(available_columns)
         if col != time_column and col.lower() not in ignore_cols
     }
 
@@ -99,31 +112,46 @@ def generate_automatic_visualizations(
         elif info["viz_type"] == "bar":
             bar_cols.append(col)
 
+    # Custom title mapping for specific columns
+    title_mapping = {
+        "environment_distractor_objects_estimate": "Objects",
+        "environment_lighting_estimate": "Lighting",
+        "environment_surface_estimate": "Materials",
+    }
+
     # Create histogram visualizations
     for col in histogram_cols:
-        col_title = col.replace("_", " ").replace("-", " ").title()
+        col_title = title_mapping.get(col, col.replace("_", " ").replace("-", " ").title())
         visualizations.append(
             {
                 "figure": create_histogram(
                     df,
                     x=col,
                     color="#1f77b4",
-                    title=f"Distribution of {col_title}",
+                    title=col_title,
                     labels={col: col_title, "count": "Count"},
                 ),
-                "title": f"{col_title} Distribution",
+                "title": col_title,
             }
         )
 
     # Create bar visualizations - handle each column separately
     for col in bar_cols:
-        col_title = col.replace("_", " ").replace("-", " ").title()
+        col_title = title_mapping.get(col, col.replace("_", " ").replace("-", " ").title())
 
         # Create aggregation consistently for both boolean and non-boolean columns
         if pd.api.types.is_bool_dtype(df[col]):
             value_counts = df[col].astype(str).value_counts()
         else:
-            value_counts = df[col].value_counts()
+            # Split comma-separated values and count each individual value
+            # Handle NaN values by converting to empty string, then splitting
+            split_values = df[col].astype(str).str.split(',').explode()
+            # Strip whitespace from each split value
+            split_values = split_values.str.strip()
+            # Remove empty strings and 'nan' strings
+            split_values = split_values[split_values != '']
+            split_values = split_values[split_values.str.lower() != 'nan']
+            value_counts = split_values.value_counts()
 
         agg_data = value_counts.reset_index()
         agg_data.columns = [col, "count"]
@@ -135,10 +163,10 @@ def generate_automatic_visualizations(
                     x=col,
                     y="count",
                     color="#1f77b4",
-                    title=f"Count by {col_title}",
+                    title="",  # No title on graph, tab title is enough
                     labels={col: col_title, "count": "Count"},
                 ),
-                "title": f"{col_title} Distribution",
+                "title": col_title,
             }
         )
     return visualizations

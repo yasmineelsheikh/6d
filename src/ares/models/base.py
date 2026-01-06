@@ -112,9 +112,39 @@ class VLM:
         self, messages: list[dict], model_kwargs: dict
     ) -> ModelResponse:
         """Wrapper for API calls with retry logic"""
-        return await acompletion(
+        print(f"[DEBUG] Making API call to model: {self.full_name}")
+        print(f"[DEBUG] Number of messages: {len(messages)}")
+        print(f"[DEBUG] Model kwargs: {model_kwargs}")
+        
+        try:
+            response = await acompletion(
             model=self.full_name, messages=messages, **model_kwargs
         )
+            print(f"[DEBUG] API call successful, response type: {type(response)}")
+            print(f"[DEBUG] Response has choices: {hasattr(response, 'choices')}")
+            if hasattr(response, 'choices') and response.choices:
+                print(f"[DEBUG] Number of choices: {len(response.choices)}")
+                if len(response.choices) > 0:
+                    choice = response.choices[0]
+                    if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                        content = choice.message.content
+            print(f"[DEBUG] First choice content length: {len(str(content)) if content else 0}")
+            print(f"[DEBUG] First choice content preview: {str(content)[:200] if content else 'None/Empty'}")
+            # Print full content if it's not too long (for debugging)
+            if content and len(str(content)) < 5000:
+                print(f"[DEBUG] First choice FULL content:\n{str(content)}")
+            else:
+                print(f"[WARNING] Response has no choices or choices is empty")
+                print(f"[DEBUG] Response attributes: {dir(response)}")
+                if hasattr(response, 'error'):
+                    print(f"[ERROR] Response has error attribute: {response.error}")
+            
+            return response
+        except Exception as e:
+            print(f"[ERROR] API call failed: {type(e).__name__}: {str(e)}")
+            import traceback
+            print(f"[ERROR] Traceback: {traceback.format_exc()}")
+            raise
 
     async def ask_async(
         self,
@@ -127,13 +157,29 @@ class VLM:
     ) -> tuple[list[dict[str, t.Any]], ModelResponse]:
         """Rate-limited async version of ask method"""
         async with self.semaphore:
+            print(f"[DEBUG] ask_async called with prompt_filename={prompt_filename}")
+            print(f"[DEBUG] Info keys: {list(info.keys()) if isinstance(info, dict) else 'N/A'}")
+            print(f"[DEBUG] Number of images: {len(images) if images else 0}")
+            
             model_kwargs = model_kwargs or dict()
             if video_path:
                 raise NotImplementedError("Video path not implemented for this VLM")
+            
             messages = self._construct_messages(
                 info, prompt_filename, images, double_prompt
             )
-            return messages, await self._make_api_call(messages, model_kwargs)
+            print(f"[DEBUG] Constructed {len(messages)} messages")
+            print(f"[DEBUG] First message role: {messages[0].get('role') if messages else 'N/A'}")
+            if messages and 'content' in messages[0]:
+                content = messages[0]['content']
+                print(f"[DEBUG] First message content type: {type(content)}")
+                if isinstance(content, list):
+                    print(f"[DEBUG] Content list length: {len(content)}")
+                    for idx, item in enumerate(content[:3]):  # Show first 3 items
+                        print(f"[DEBUG] Content item {idx} type: {type(item)}, keys: {list(item.keys()) if isinstance(item, dict) else 'N/A'}")
+            
+            response = await self._make_api_call(messages, model_kwargs)
+            return messages, response
 
     def ask(
         self,
@@ -286,10 +332,120 @@ class SentenceTransformerEmbedder(Embedder):
 
 
 def parse_response(choice: t.Any, load_json: bool = False) -> dict | str:
-    content: str = choice.message.content
+    print(f"[DEBUG] parse_response called with load_json={load_json}")
+    print(f"[DEBUG] Choice type: {type(choice)}")
+    print(f"[DEBUG] Choice has message: {hasattr(choice, 'message')}")
+    
+    if not hasattr(choice, 'message'):
+        raise ValueError(f"Choice object has no 'message' attribute. Choice type: {type(choice)}, attributes: {dir(choice)}")
+    
+    message = choice.message
+    print(f"[DEBUG] Message type: {type(message)}")
+    print(f"[DEBUG] Message has content: {hasattr(message, 'content')}")
+    
+    if not hasattr(message, 'content'):
+        raise ValueError(f"Message object has no 'content' attribute. Message type: {type(message)}, attributes: {dir(message)}")
+    
+    content: str = message.content
+    print(f"[DEBUG] Raw content type: {type(content)}, value: {str(content)[:200] if content else 'None/Empty'}")
+    print(f"[DEBUG] Content is None: {content is None}")
+    print(f"[DEBUG] Content is empty string: {content == ''}")
+    print(f"[DEBUG] Content length: {len(str(content)) if content else 0}")
+    
+    if content is None:
+        raise ValueError("Content is None - VLM returned no response")
+    if content == '':
+        raise ValueError("Content is empty string - VLM returned empty response")
+    
     if load_json:
-        content = content.strip().removeprefix("```json").removesuffix("```").strip()
-        content = json.loads(content) if isinstance(content, str) else content
+        print(f"[DEBUG] Processing JSON content...")
+        content_stripped = content.strip()
+        print(f"[DEBUG] After strip, length: {len(content_stripped)}")
+        
+        # Check if VLM is refusing to analyze (check BEFORE extraction)
+        refusal_indicators = [
+            "i'm sorry",
+            "i can't",
+            "i cannot",
+            "unable to",
+            "can't assist",
+            "can't directly",
+            "can't view",
+            "can't analyze",
+        ]
+        content_lower = content_stripped.lower()
+        if any(indicator in content_lower[:300] for indicator in refusal_indicators):
+            print(f"[WARNING] VLM response appears to be refusing to analyze images")
+            print(f"[WARNING] Full response: {content_stripped[:1000]}")
+            raise ValueError(f"VLM refused to analyze content. This may be due to content policy or image encoding issues. Response: {content_stripped[:500]}")
+        
+        # Try multiple strategies to extract JSON:
+        import re
+        # 1. Look for ```json ... ``` block (even if there's text before it)
+        json_match = re.search(r'```json\s*(.*?)\s*```', content_stripped, re.DOTALL)
+        if json_match:
+            print(f"[DEBUG] Found JSON in markdown code block with json tag")
+            content_stripped = json_match.group(1).strip()
+        else:
+            # 2. Look for ``` ... ``` block (without json tag) containing JSON
+            json_match = re.search(r'```\s*(\{.*?\})\s*```', content_stripped, re.DOTALL)
+            if json_match:
+                print(f"[DEBUG] Found JSON in code block without json tag")
+                content_stripped = json_match.group(1).strip()
+            else:
+                # 3. Look for JSON object directly (starts with { and ends with })
+                # Use a more robust regex that handles nested braces
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content_stripped, re.DOTALL)
+                if json_match:
+                    print(f"[DEBUG] Found JSON object in text (no code blocks)")
+                    content_stripped = json_match.group(0).strip()
+                else:
+                    # 4. Fallback: try simple prefix/suffix removal
+                    content_stripped = content_stripped.removeprefix("```json").removesuffix("```").strip()
+        
+        print(f"[DEBUG] After extracting JSON, length: {len(content_stripped)}")
+        print(f"[DEBUG] Content to parse (first 500 chars): {content_stripped[:500]}")
+        
+        if not content_stripped:
+            raise ValueError("Content is empty after extracting JSON - cannot parse JSON")
+        
+        try:
+            parsed = json.loads(content_stripped) if isinstance(content_stripped, str) else content_stripped
+            print(f"[DEBUG] Successfully parsed JSON, type: {type(parsed)}, keys: {list(parsed.keys()) if isinstance(parsed, dict) else 'N/A'}")
+            return parsed
+        except json.JSONDecodeError as e:
+            print(f"[ERROR] JSON decode error: {e}")
+            print(f"[ERROR] Error position: {e.pos if hasattr(e, 'pos') else 'unknown'}")
+            print(f"[ERROR] Failed to parse content (first 1000 chars): {content_stripped[:1000]}")
+            
+            # Try to find and extract JSON starting from first {
+            if '{' in content_stripped:
+                json_start = content_stripped.find('{')
+                print(f"[DEBUG] Found '{{' at position {json_start}, trying to extract from there...")
+                # Try to find matching closing brace by counting braces
+                brace_count = 0
+                json_end = json_start
+                for i in range(json_start, len(content_stripped)):
+                    if content_stripped[i] == '{':
+                        brace_count += 1
+                    elif content_stripped[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_end = i + 1
+                            break
+                
+                if brace_count == 0:
+                    json_extract = content_stripped[json_start:json_end]
+                    print(f"[DEBUG] Extracted JSON substring (length {len(json_extract)})")
+                    try:
+                        parsed = json.loads(json_extract)
+                        print(f"[DEBUG] Successfully parsed extracted JSON")
+                        return parsed
+                    except json.JSONDecodeError as e2:
+                        print(f"[ERROR] Still failed to parse extracted JSON: {e2}")
+            
+            raise ValueError(f"Failed to parse JSON from content: {e}. Content preview: {content_stripped[:200]}")
+    
     return content
 
 

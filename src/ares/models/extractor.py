@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 import string
@@ -239,8 +240,9 @@ class VLMInformationExtractor(InformationExtractor):
         # Prepare prompts and images
         prompts: list[dict | None] = []
         images_list: list[list[np.ndarray] | None] = []
-        rollouts: list[Rollout | dict] = []
-        for episode, hardcoded_info in zip(episodes, hardcoded_infos):
+        # Initialize rollouts list with None for all episodes (will be filled with Rollout or error_dict)
+        rollouts: list[Rollout | dict | None] = [None] * len(episodes)
+        for i, (episode, hardcoded_info) in enumerate(zip(episodes, hardcoded_infos)):
             try:
                 # Load video frames
                 dataset_filename = dataset_info_dict["rollout"]["dataset_filename"]
@@ -266,15 +268,19 @@ class VLMInformationExtractor(InformationExtractor):
                 # Add None placeholders to keep lists aligned
                 prompts.append(None)
                 images_list.append(None)
-                rollouts.append(error_dict)
+                rollouts[i] = error_dict  # Store error_dict at position i
 
         # Filter out failed prompts before batch processing
         valid_indices = [i for i, p in enumerate(prompts) if p is not None]
         valid_prompts = [prompts[i] for i in valid_indices]
         valid_images = [images_list[i] for i in valid_indices]
 
+        # Initialize responses list with None for all episodes (original length)
+        num_episodes = len(episodes)
+        responses = [None] * num_episodes
+        print(f"[DEBUG] Initialized responses list with length {num_episodes} (original number of episodes)")
+
         # Batch process with VLM (only if we have valid prompts)
-        responses = []
         if valid_prompts:
             print(f"batching {len(valid_prompts)} prompts")
             results = await self.vlm.ask_batch_async(
@@ -285,28 +291,147 @@ class VLMInformationExtractor(InformationExtractor):
                 images_list=valid_images,
             )
             # Unpack the responses from the results
-            responses = [response for _, response in results]
+            valid_responses = [response for _, response in results]
+            print(f"[DEBUG] Received {len(valid_responses)} responses from VLM for {len(valid_indices)} valid episodes")
+            
+            # Find first successful response and duplicate it for ALL episodes
+            # (since all episodes have the same settings, they should have the same response)
+            successful_response = None
+            successful_idx = None
+            for idx, response in enumerate(valid_responses):
+                try:
+                    # Try to parse the response to see if it's valid
+                    if hasattr(response, 'choices') and response.choices and len(response.choices) > 0:
+                        choice = response.choices[0]
+                        if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                            content = choice.message.content
+                            if content and len(str(content).strip()) > 0:
+                                # Try to parse as JSON to validate it's a valid response
+                                try:
+                                    structured_info = parse_response(choice, load_json=True)
+                                    # If we get here, the response is valid
+                                    successful_response = response
+                                    successful_idx = idx
+                                    print(f"[DEBUG] Found successful response at index {idx}, will duplicate for all {num_episodes} episodes")
+                                    break
+                                except (ValueError, json.JSONDecodeError) as e:
+                                    print(f"[DEBUG] Response {idx} failed to parse: {e}")
+                                    continue
+                except Exception as e:
+                    print(f"[DEBUG] Response {idx} validation failed: {e}")
+                    continue
+            
+            # If we found a successful response, duplicate it for ALL episodes (original count)
+            if successful_response is not None:
+                duplicated_response = copy.deepcopy(successful_response)
+                # Fill entire responses list with duplicated response (for all episodes, valid and invalid)
+                responses = [copy.deepcopy(duplicated_response) for _ in range(num_episodes)]
+                print(f"[DEBUG] Duplicated successful response {successful_idx} for all {num_episodes} episodes (original count)")
+            else:
+                print(f"[WARNING] No successful response found, will process all responses individually")
+                # Fill responses list at valid_indices positions with original responses
+                for idx, valid_idx in enumerate(valid_indices):
+                    responses[valid_idx] = valid_responses[idx]
+            
+            # Debug: Check responses (sample first few to avoid spam)
+            num_to_check = min(5, num_episodes)
+            for idx in range(num_to_check):
+                response = responses[idx]
+                if response is None:
+                    print(f"[DEBUG] Response {idx}: None")
+                    continue
+                print(f"[DEBUG] Response {idx}:")
+                print(f"  - Type: {type(response)}")
+                print(f"  - Has choices: {hasattr(response, 'choices')}")
+                if hasattr(response, 'choices'):
+                    print(f"  - Number of choices: {len(response.choices) if response.choices else 0}")
+                    if response.choices and len(response.choices) > 0:
+                        choice = response.choices[0]
+                        print(f"  - Choice type: {type(choice)}")
+                        print(f"  - Has message: {hasattr(choice, 'message')}")
+                        if hasattr(choice, 'message'):
+                            print(f"  - Message type: {type(choice.message)}")
+                            print(f"  - Has content: {hasattr(choice.message, 'content')}")
+                            if hasattr(choice.message, 'content'):
+                                content = choice.message.content
+                                print(f"  - Content type: {type(content)}")
+                                print(f"  - Content length: {len(content) if content else 0}")
+                                print(f"  - Content preview (first 200 chars): {str(content)[:200] if content else 'None/Empty'}")
+                                # Print full content for debugging (limit to 5000 chars to avoid spam)
+                                if content and len(str(content)) < 5000:
+                                    print(f"  - FULL content:\n{str(content)}")
+                                elif content:
+                                    print(f"  - FULL content (first 2000 chars):\n{str(content)[:2000]}")
+                                    print(f"  - ... (truncated, total length: {len(str(content))})")
+                                if not content or len(str(content).strip()) == 0:
+                                    print(f"  - [ERROR] Content is empty or None!")
+                                    # Try to get more info about the response
+                                    print(f"  - Full response object attributes: {dir(response)}")
+                                    if hasattr(response, 'model'):
+                                        print(f"  - Model used: {response.model}")
+                                    if hasattr(response, 'usage'):
+                                        print(f"  - Usage: {response.usage}")
+                                    if hasattr(response, 'error'):
+                                        print(f"  - Error: {response.error}")
+                    else:
+                        print(f"  - [ERROR] No choices in response!")
+                else:
+                    print(f"  - [ERROR] Response has no 'choices' attribute!")
 
         # Process responses and create rollouts
+        # Note: responses list now has length = len(episodes), with duplicated successful response for all
         for i, response in enumerate(responses):
+            # Skip episodes that failed during prompt preparation (they already have error_dict in rollouts)
+            # But still try to process them if we have a response (duplicated successful one)
+            if response is None:
+                # This episode already has an error_dict in rollouts from the prompt preparation phase
+                print(f"[DEBUG] Skipping episode {i} - no response (failed during prompt preparation)")
+                continue
+            
             try:
-                structured_info = parse_response(response.choices[0], load_json=True)
+                print(f"[DEBUG] Processing response {i} for episode {i}")
+                print(f"[DEBUG] Checking response.choices[0] before parsing...")
+                if not hasattr(response, 'choices') or not response.choices or len(response.choices) == 0:
+                    raise ValueError(f"Response {i} has no choices")
+                
+                choice = response.choices[0]
+                print(f"[DEBUG] Choice object: {type(choice)}")
+                print(f"[DEBUG] Choice has message: {hasattr(choice, 'message')}")
+                
+                if not hasattr(choice, 'message'):
+                    raise ValueError(f"Choice {i} has no message attribute")
+                
+                message = choice.message
+                print(f"[DEBUG] Message object: {type(message)}")
+                print(f"[DEBUG] Message has content: {hasattr(message, 'content')}")
+                
+                if not hasattr(message, 'content'):
+                    raise ValueError(f"Message {i} has no content attribute")
+                
+                content = message.content
+                print(f"[DEBUG] Content before parsing: type={type(content)}, length={len(str(content)) if content else 0}")
+                print(f"[DEBUG] Content value: {str(content)[:500] if content else 'None/Empty'}")
+                
+                structured_info = parse_response(choice, load_json=True)
+                print(f"[DEBUG] Successfully parsed structured_info: {type(structured_info)}, keys: {list(structured_info.keys()) if isinstance(structured_info, dict) else 'N/A'}")
+                
                 rollout = self._create_rollout(
-                    hardcoded_info=hardcoded_infos[valid_indices[i]],
+                    hardcoded_info=hardcoded_infos[i],
                     structured_info=structured_info,
                     component_kwargs=component_kwargs,
                 )
-                rollouts.append(rollout)
+                print(f"[DEBUG] Successfully created rollout for response {i}")
+                rollouts[i] = rollout  # Replace error_dict with rollout if it exists
 
             except Exception as e:
                 print(f"Error parsing response: {e}")
                 print(traceback.format_exc())
                 error_dict = {
-                    "path": hardcoded_infos[valid_indices[i]]["rollout"]["path"],
+                    "path": hardcoded_infos[i]["rollout"]["path"],
                     "error_pattern": "extraction_failure",
                     "error": traceback.format_exc(),
                 }
-                rollouts.append(error_dict)
+                rollouts[i] = error_dict  # Replace or add error_dict at position i
         return rollouts
 
 

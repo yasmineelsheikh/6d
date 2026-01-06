@@ -51,13 +51,14 @@ def create_line_plot(
         "legend_title_text": "",
         "plot_bgcolor": "rgba(0,0,0,0)",
         "paper_bgcolor": "rgba(0,0,0,0)",
-        "font": {"family": "sans-serif"},
+        "font": {"family": "sans-serif", "color": "white"},
+        "legend": {"font": {"color": "white"}},
     }
     if y_format:
         layout_args["yaxis_tickformat"] = y_format
     fig.update_layout(**layout_args)
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)', title_font={"color": "white"}, tickfont={"color": "white"})
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)', title_font={"color": "white"}, tickfont={"color": "white"})
     return fig
 
 
@@ -90,11 +91,11 @@ def create_histogram(
         bargap=0.1,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        font={"family": "sans-serif"},
+        font={"family": "sans-serif", "color": "white"},
     )
     fig.update_traces(marker_line_width=1, marker_line_color="white")
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)', title_font={"color": "white"}, tickfont={"color": "white"})
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)', title_font={"color": "white"}, tickfont={"color": "white"})
     return fig
 
 
@@ -118,16 +119,30 @@ def create_bar_plot(
         labels=labels,
         color_discrete_sequence=[color],
     )
+    
+    # Set reasonable bar width (max 0.4 of category spacing - half of previous)
+    # This prevents bars from being too wide when there are few categories
+    num_categories = len(df[x].unique())
+    if num_categories <= 5:
+        # For few categories, set a fixed maximum bar width (half of previous)
+        max_bar_width = 0.3
+    else:
+        # For many categories, use default spacing (half of previous)
+        max_bar_width = 0.4
+    
+    fig.update_traces(width=max_bar_width)
+    
     fig.update_layout(
         xaxis_title=labels.get(x, x),
         yaxis_title=labels.get(y, y),
         showlegend=False,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        font={"family": "sans-serif"},
+        font={"family": "sans-serif", "color": "white"},
+        bargap=0.2,  # Add gap between bars
     )
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_xaxes(showgrid=False, title_font={"color": "white"}, tickfont={"color": "white"})
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)', title_font={"color": "white"}, tickfont={"color": "white"})
     return fig
 
 
