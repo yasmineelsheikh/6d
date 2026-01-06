@@ -1,5 +1,0 @@
-{
-  "/page": "app/page.js",
-  "/api/ares/initialize/route": "app/api/ares/initialize/route.js",
-  "/ares-dashboard/page": "app/ares-dashboard/page.js"
-}

@@ -166,3 +166,24 @@ cython_debug/
 data/*
 !data/.gitkeep
 .DS_Storecosmos-transfer2.5/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
