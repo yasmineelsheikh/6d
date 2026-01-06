@@ -79,18 +79,18 @@ def run_cosmos(req: CosmosRequest):
             output_urls = []
             for i, video_path in enumerate(video_files):
                 episode_index = Path(video_path).stem
-                
-                # Prepare JSON input for Cosmos
+
+        # Prepare JSON input for Cosmos
                 cosmos_input_spec = os.path.join(temp_dir, f"input_spec_{i}.json")
-                cosmos_input = {
+        cosmos_input = {
                     "name": f"{dataset_name}_{episode_index}",
-                    "prompt_path": prompt_path,
+            "prompt_path": prompt_path,
                     "video_path": video_path,
-                    "guidance": 3,
-                    "edge": {"control_weight": 0.5},
-                    "vis": {"control_weight": 0.2}
-                }
-                with open(cosmos_input_spec, "w") as f:
+            "guidance": 3,
+            "edge": {"control_weight": 0.5},
+            "vis": {"control_weight": 0.2}
+        }
+        with open(cosmos_input_spec, "w") as f:
                     json.dump(cosmos_input, f, indent=2)
 
                 # Create output directory
@@ -108,7 +108,7 @@ def run_cosmos(req: CosmosRequest):
                 command = [
                     "python",
                     cosmos_script,
-                    "-i", cosmos_input_spec,
+            "-i", cosmos_input_spec,
                     f"setup.output_dir={output_dir}",
                     "--s3-bucket", S3_BUCKET,
                     "--s3-prefix", f"outputs/{dataset_name}"
@@ -128,7 +128,7 @@ def run_cosmos(req: CosmosRequest):
                 if output_files:
                     output_video = output_files[0]
                     # Upload output to S3
-                    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                     s3_key = f"outputs/{dataset_name}/{episode_index}_{timestamp}.mp4"
 
                     try:

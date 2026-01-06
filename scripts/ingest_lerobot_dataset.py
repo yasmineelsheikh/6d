@@ -13,12 +13,13 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from ares.configs.base import Environment, Robot, Rollout, Task, Trajectory
-from ares.databases.structured_database import (
-    RolloutSQLModel,
-    add_rollout,
-    setup_database,
-)
+# Database imports removed - step 3c (database record creation) is skipped
+# from ares.configs.base import Environment, Robot, Rollout, Task, Trajectory
+# from ares.databases.structured_database import (
+#     RolloutSQLModel,
+#     add_rollout,
+#     setup_database,
+# )
 
 
 def load_metadata(dataset_path: Path) -> tuple[dict, pd.DataFrame]:
@@ -113,7 +114,12 @@ def process_chunk(
     engine,
     dataset_formalname: str,
 ) -> int:
-    """Process a single chunk of parquet files."""
+    """Process a single chunk of parquet files.
+    
+    NOTE: Step 3c (database record creation) is skipped.
+    This function only counts episodes and processes videos.
+    No database records (Robot, Environment, Task, Trajectory, Rollout) are created.
+    """
     count = 0
     for file_path in chunk_path.glob("*.parquet"):
         df = pd.read_parquet(file_path)
@@ -123,100 +129,15 @@ def process_chunk(
             # Sort by frame_index to ensure order
             episode_df = episode_df.sort_values("frame_index")
             
-            # Extract trajectory data
-            states = [s.tolist() if isinstance(s, np.ndarray) else s for s in episode_df["observation.state"]]
-            # Some datasets might use different action keys, but LeRobot usually uses 'action'
-            actions = [a.tolist() if isinstance(a, np.ndarray) else a for a in episode_df["action"]]
+            # Step 3c SKIPPED: Database record creation
+            # The following would normally be created but are skipped:
+            # - Robot object
+            # - Environment object  
+            # - Task object
+            # - Trajectory object
+            # - Rollout object (with add_rollout to database)
             
-            # Extract task info
-            task_idx = episode_df["task_index"].iloc[0]
-            # Handle case where task_index might not match directly if tasks_df index is not aligned
-            # Assuming task_index corresponds to the row index in tasks_df or a specific column
-            # In the inspected file, tasks_df has 'task_index' column and index is the description? 
-            # Wait, inspected output showed:
-            #                      task_index
-            # Stack colorful cups           0
-            # So the index is the description, and 'task_index' is the value.
-            
-            task_description = "Unknown Task"
-            # Find the description where task_index matches
-            matching_task = tasks_df[tasks_df["task_index"] == task_idx]
-            if not matching_task.empty:
-                task_description = matching_task.index[0]
-            
-            # Construct ARES objects
-            
-            # Robot
-            # Infer from info or default
-            robot_type = info.get("robot_type", "ur5e") # Defaulting to ur5e as common, but should check info
-            # info.json usually has 'robot_type' or similar. 
-            # For now, we'll use a generic placeholder if missing, or try to parse from path
-            
-            robot = Robot(
-                embodiment=robot_type,
-                morphology=robot_type, # Simplified
-                action_space="joint_pos", # Assumption for LeRobot usually
-                rgb_cams=None, # Would need to check video folder
-                depth_cams=None,
-                wrist_cams=None,
-                color_estimate="unknown",
-                camera_angle_estimate="unknown"
-            )
-            
-            # Environment
-            env = Environment(
-                name="real_world",
-                lighting_estimate="normal",
-                simulation_estimate=False,
-                background_estimate="unknown",
-                surface_estimate="unknown",
-                focus_objects_estimate="",
-                distractor_objects_estimate="",
-                people_estimate=False,
-                static_estimate=True
-            )
-            
-            # Task
-            task = Task(
-                language_instruction=task_description,
-                language_instruction_type="instruction",
-                success_estimate=1.0, # Assuming collected data is successful demonstrations? LeRobot usually is.
-                complexity_category_estimate="medium",
-                complexity_score_estimate=0.5,
-                rarity_estimate=0.0
-            )
-            
-            # Trajectory
-            trajectory = Trajectory(
-                states=json.dumps(states),
-                actions=json.dumps(actions),
-                is_first=0,
-                is_last=len(states) - 1,
-                is_terminal=len(states) - 1,
-                rewards=None # LeRobot data often doesn't have explicit rewards per step in the parquet
-            )
-            
-            # Rollout
-            rollout_id = uuid.uuid4()
-            rollout = Rollout(
-                id=rollout_id,
-                creation_time=datetime.now(),
-                ingestion_time=datetime.now(),
-                path=str(dataset_path),
-                filename=f"episode_{episode_idx}", # Point to the split video
-                dataset_name=dataset_path.name,
-                dataset_filename=dataset_formalname, # This matches the folder in ARES_VIDEO_DIR
-                dataset_formalname=dataset_formalname,
-                description_estimate=f"LeRobot episode {episode_idx} for task: {task_description}",
-                length=len(states),
-                robot=robot,
-                environment=env,
-                task=task,
-                trajectory=trajectory,
-                split="train" # Default
-            )
-            
-            add_rollout(engine, rollout, RolloutSQLModel)
+            # Just count episodes for reporting
             count += 1
             
     return count
@@ -225,14 +146,18 @@ def process_chunk(
 def ingest_dataset(data_dir: str, engine_url: str, dataset_name: str) -> int:
     """Ingest LeRobot dataset into ARES.
     
+    NOTE: Step 3c (database record creation) is skipped.
+    Only processes videos and counts episodes. No database records are created.
+    
     Returns:
-        int: Number of episodes ingested
+        int: Number of episodes processed (not ingested into database)
     """
     dataset_path = Path(data_dir)
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset directory not found: {data_dir}")
         
-    engine = setup_database(RolloutSQLModel, path=engine_url)
+    # Step 3c SKIPPED: Database setup skipped since we're not creating records
+    engine = None
     
     print(f"Loading metadata from {dataset_path}...")
     info, tasks_df = load_metadata(dataset_path)
@@ -252,8 +177,8 @@ def ingest_dataset(data_dir: str, engine_url: str, dataset_name: str) -> int:
                 
             count = process_chunk(chunk_path, dataset_path, info, tasks_df, engine, dataset_name)
             total_episodes += count
-            
-    print(f"Ingestion complete. Total episodes ingested: {total_episodes}")
+    
+    print(f"Ingestion complete. Total episodes processed: {total_episodes} (videos split, database records skipped)")
     return total_episodes
 
 

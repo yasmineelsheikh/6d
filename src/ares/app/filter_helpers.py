@@ -20,7 +20,7 @@ import streamlit as st
 
 from ares.app.data_analysis import infer_visualization_type
 from ares.constants import IGNORE_COLS
-from ares.models.shortcuts import summarize
+#from ares.models.shortcuts import summarize
 from ares.utils.clustering import visualize_clusters
 
 

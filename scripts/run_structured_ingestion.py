@@ -29,8 +29,8 @@ from ares.databases.structured_database import (
     get_partial_df,
     setup_database,
 )
-from ares.models.extractor import InformationExtractor, VLMInformationExtractor
 from ares.models.shortcuts import get_vlm
+from ares.models.extractor import InformationExtractor, VLMInformationExtractor
 from ares.utils.image_utils import save_video
 
 

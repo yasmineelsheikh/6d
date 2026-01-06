@@ -18,7 +18,8 @@ from ares.databases.structured_database import (
     RolloutSQLModel,
     setup_database,
 )
-from ares.models.base import VLM
+# Lazy import VLM to avoid hanging on module import
+# from ares.models.base import VLM
 from ares.utils.clustering import cluster_embeddings
 
 
@@ -142,43 +143,65 @@ def initialize_data(tmp_dump_dir: str) -> None:
         if index_name not in index_manager.indices:
             print(f"Index {index_name} not found, skipping.")
             continue
-        stored_embeddings = index_manager.indices[index_name].get_all_vectors()
-        stored_ids = index_manager.indices[index_name].get_all_ids()
-        # Try loading from cache first
-        cached_data = load_cached_embeddings(
-            tmp_dump_dir, index_name, stored_embeddings
-        )
-        if cached_data is not None:
-            embeddings, reduced, labels, ids = cached_data  # Unpack IDs from cache
-        else:
-            # Create new embeddings and clusters
-            embeddings = stored_embeddings
-            reduced, labels, _ = cluster_embeddings(embeddings)
-            ids = stored_ids  # Use the IDs from the index
-            save_embeddings(tmp_dump_dir, index_name, embeddings, reduced, labels, ids)
+        try:
+            print(f"  Getting vectors and IDs for {index_name}...")
+            stored_embeddings = index_manager.indices[index_name].get_all_vectors()
+            stored_ids = index_manager.indices[index_name].get_all_ids()
+            print(f"  Found {len(stored_embeddings)} embeddings for {index_name}")
+            
+            # Try loading from cache first
+            print(f"  Checking cache for {index_name}...")
+            cached_data = load_cached_embeddings(
+                tmp_dump_dir, index_name, stored_embeddings
+            )
+            if cached_data is not None:
+                print(f"  Using cached data for {index_name}")
+                embeddings, reduced, labels, ids = cached_data  # Unpack IDs from cache
+            else:
+                # Create new embeddings and clusters
+                print(f"  Computing clusters for {index_name} (this may take a while)...")
+                embeddings = stored_embeddings
+                reduced, labels, _ = cluster_embeddings(embeddings)
+                ids = stored_ids  # Use the IDs from the index
+                print(f"  Saving embeddings for {index_name}...")
+                save_embeddings(tmp_dump_dir, index_name, embeddings, reduced, labels, ids)
+                print(f"  Completed clustering for {index_name}")
 
-        # Store in session state
-        store_in_session(index_name, embeddings, reduced, labels, stored_ids)
+            # Store in session state
+            print(f"  Storing {index_name} in session state...")
+            store_in_session(index_name, embeddings, reduced, labels, stored_ids)
+            print(f"  Successfully processed {index_name}")
+        except Exception as e:
+            print(f"  ERROR processing {index_name}: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Continue with other indices even if one fails
+            continue
 
     print("Setting up models")
     st.session_state.models = dict()
-    st.session_state.models["summarizer"] = VLM(provider="openai", name="gpt-4o-mini")
+    
+    # Skip VLM initialization for now - it hangs on import
+    # VLM can be initialized later when actually needed
+    print("  Skipping VLM initialization (can be initialized later when needed)")
+    st.session_state.models["summarizer"] = None
+    print("Models setup complete (VLM skipped)")
 
     # Annotations database is optional in local/dev setups; handle failures gracefully.
-    try:
-        print("Setting up annotations database")
-        st.session_state.annotations_db = AnnotationDatabase(
-            connection_string=ANNOTATION_DB_PATH
-        )
-        print("Getting annotations database stats")
-        st.session_state.annotation_db_stats = (
-            st.session_state.annotations_db.get_database_stats()
-        )
-    except Exception as e:
-        # If MongoDB is not running or not reachable, continue without annotations.
-        print(f"Warning: could not connect to AnnotationDatabase at {ANNOTATION_DB_PATH}: {e}")
-        st.session_state.annotations_db = None
-        st.session_state.annotation_db_stats = {}
+    # try:
+    #     print("Setting up annotations database")
+    #     st.session_state.annotations_db = AnnotationDatabase(
+    #         connection_string=ANNOTATION_DB_PATH
+    #     )
+    #     print("Getting annotations database stats")
+    #     st.session_state.annotation_db_stats = (
+    #         st.session_state.annotations_db.get_database_stats()
+    #     )
+    # except Exception as e:
+    #     # If MongoDB is not running or not reachable, continue without annotations.
+    #     print(f"Warning: could not connect to AnnotationDatabase at {ANNOTATION_DB_PATH}: {e}")
+    #     st.session_state.annotations_db = None
+    #     st.session_state.annotation_db_stats = {}
 
 
 def display_state_info() -> None:
