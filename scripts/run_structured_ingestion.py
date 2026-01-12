@@ -283,7 +283,7 @@ def main(
     builder, dataset_dict = build_dataset(dataset_filename, data_dir)
     for split in dataset_dict.keys():
         ds = dataset_dict[split]
-        dataset_info = get_dataset_information(dataset_filename)
+        dataset_info = {} #dataset_info = get_dataset_information(dataset_filename)
         dataset_info["Dataset Filename"] = dataset_filename
         dataset_info["Dataset Formalname"] = dataset_formalname
         dataset_info["Split"] = split

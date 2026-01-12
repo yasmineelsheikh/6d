@@ -14,11 +14,13 @@ import traceback
 import boto3
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
-from pydantic import BaseModel
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
 import requests
 from dotenv import load_dotenv
 
@@ -29,12 +31,290 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# Import auth utilities
+from auth import (
+    get_db, create_user, get_user_by_email,
+    verify_password, create_access_token, decode_access_token, User
+)
+
 app = FastAPI(title="Ares Platform API", version="1.0.0")
+
+# Security
+security = HTTPBearer()
 
 @app.get("/health")
 async def health_check():
     """Simple health check endpoint."""
     return {"status": "ok", "message": "Backend is running"}
+
+# Tasks API Endpoints
+class TaskRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    dataset_path: Optional[str] = ""
+    prompt: Optional[str] = ""
+    priority: Optional[str] = "medium"
+
+class TaskResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = ""
+    dataset_path: Optional[str] = ""
+    prompt: Optional[str] = ""
+    priority: Optional[str] = "medium"
+    created_at: str
+
+# In-memory task storage (in production, use a database)
+tasks_storage: Dict[str, Dict[str, Any]] = {}
+
+@app.post("/api/tasks", response_model=TaskResponse)
+async def create_task(task: TaskRequest):
+    """Create a new task."""
+    try:
+        import uuid
+        from datetime import datetime
+        
+        task_id = str(uuid.uuid4())
+        task_data = {
+            "id": task_id,
+            "name": task.name,
+            "description": task.description or "",
+            "dataset_path": task.dataset_path or "",
+            "prompt": task.prompt or "",
+            "priority": task.priority or "medium",
+            "created_at": datetime.now().isoformat(),
+        }
+        
+        tasks_storage[task_id] = task_data
+        
+        return TaskResponse(**task_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating task: {str(e)}")
+
+@app.get("/api/tasks", response_model=List[TaskResponse])
+async def get_tasks():
+    """Get all tasks."""
+    try:
+        return [TaskResponse(**task) for task in tasks_storage.values()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching tasks: {str(e)}")
+
+@app.get("/api/tasks/{task_id}", response_model=TaskResponse)
+async def get_task(task_id: str):
+    """Get a specific task by ID."""
+    try:
+        if task_id not in tasks_storage:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return TaskResponse(**tasks_storage[task_id])
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching task: {str(e)}")
+
+@app.delete("/api/tasks/{task_id}")
+async def delete_task(task_id: str):
+    """Delete a task."""
+    try:
+        if task_id not in tasks_storage:
+            raise HTTPException(status_code=404, detail="Task not found")
+        del tasks_storage[task_id]
+        return {"success": True, "message": "Task deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting task: {str(e)}")
+
+# Settings API Endpoints
+class SettingsRequest(BaseModel):
+    api_endpoint: Optional[str] = None
+    default_dataset_path: Optional[str] = None
+    auto_save: Optional[bool] = None
+    theme: Optional[str] = None
+    max_episodes_display: Optional[int] = None
+    vlm_provider: Optional[str] = None
+    vlm_model: Optional[str] = None
+
+class SettingsResponse(BaseModel):
+    api_endpoint: Optional[str] = None
+    default_dataset_path: Optional[str] = None
+    auto_save: Optional[bool] = None
+    theme: Optional[str] = None
+    max_episodes_display: Optional[int] = None
+    vlm_provider: Optional[str] = None
+    vlm_model: Optional[str] = None
+
+# In-memory settings storage (in production, use a database or config file)
+settings_storage: Dict[str, Any] = {}
+
+@app.post("/api/settings", response_model=SettingsResponse)
+async def save_settings(settings: SettingsRequest):
+    """Save application settings."""
+    try:
+        # Update settings storage with provided values
+        settings_dict = settings.dict(exclude_unset=True)
+        settings_storage.update(settings_dict)
+        
+        return SettingsResponse(**settings_storage)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving settings: {str(e)}")
+
+@app.get("/api/settings", response_model=SettingsResponse)
+async def get_settings():
+    """Get current application settings."""
+    try:
+        return SettingsResponse(**settings_storage)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching settings: {str(e)}")
+
+# Authentication Models
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    first_name: str
+    last_name: str
+    password: str
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    first_name: str
+    last_name: str
+    created_at: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """Get the current authenticated user."""
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user_id: str = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+@app.post("/api/auth/register", response_model=TokenResponse)
+async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    """Register a new user."""
+    try:
+        # Validate password length (bcrypt limit is 72 bytes)
+        password_bytes = len(request.password.encode('utf-8'))
+        if password_bytes > 72:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password is too long. Maximum length is 72 characters."
+            )
+        
+        if len(request.password) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 6 characters long."
+            )
+        
+        # Check if user already exists
+        if get_user_by_email(db, request.email):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+        
+        # Create user
+        user = create_user(db, request.email, request.first_name, request.last_name, request.password)
+        
+        # Create access token
+        access_token = create_access_token(data={"sub": user.id})
+        
+        return TokenResponse(
+            access_token=access_token,
+            token_type="bearer",
+            user=UserResponse(
+                id=user.id,
+                email=user.email,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                created_at=user.created_at.isoformat() if user.created_at else ""
+            )
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"Registration error: {error_detail}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error registering user: {str(e)}"
+        )
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """Login and get access token."""
+    try:
+        user = get_user_by_email(db, request.email)
+        if not user or not verify_password(request.password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Create access token
+        access_token = create_access_token(data={"sub": user.id})
+        
+        return TokenResponse(
+            access_token=access_token,
+            token_type="bearer",
+            user=UserResponse(
+                id=user.id,
+                email=user.email,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                created_at=user.created_at.isoformat() if user.created_at else ""
+            )
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error logging in: {str(e)}"
+        )
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current user information."""
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        first_name=current_user.first_name,
+        last_name=current_user.last_name,
+        created_at=current_user.created_at.isoformat() if current_user.created_at else ""
+    )
 
 @app.get("/api/test")
 async def test_endpoint():

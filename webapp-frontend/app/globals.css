@@ -3,12 +3,14 @@
 @tailwind utilities;
 
 * {
-  border-color: #2a2a2a;
+  /* Slightly brighter borders for better contrast */
+  border-color: #353944;
 }
 
 body {
-  color: #d4d4d4;
-  background: #1a1a1a;
+  /* Higher-contrast, slightly cooler dark theme */
+  color: #e3e8f0;
+  background: #12151b;
   font-feature-settings: "rlig" 1, "calt" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 
 const Plot = dynamic(
@@ -86,11 +86,11 @@ export default function DatasetDistributions({
     })),
     layout: {
       title: '',
-      xaxis: { title: '', showgrid: true, gridcolor: '#2a2a2a', color: '#8a8a8a' },
-      yaxis: { title: '', showgrid: true, gridcolor: '#2a2a2a', color: '#8a8a8a' },
+      xaxis: { title: '', showgrid: true, gridcolor: '#343a46', color: '#b5becb' },
+      yaxis: { title: '', showgrid: true, gridcolor: '#343a46', color: '#b5becb' },
       plot_bgcolor: 'transparent',
       paper_bgcolor: 'transparent',
-      font: { color: '#8a8a8a', size: 10 },
+      font: { color: '#b5becb', size: 11 },
       height: 400,
       margin: { l: 40, r: 40, t: 20, b: 40 },
     },
@@ -107,8 +107,8 @@ export default function DatasetDistributions({
             onClick={() => setActiveMainTab('environment')}
             className={`px-4 py-2 text-sm font-medium transition-colors relative ${
               activeMainTab === 'environment'
-                ? 'text-[#d4d4d4]'
-                : 'text-[#8a8a8a] hover:text-[#b4b4b4]'
+                ? 'text-[#e3e8f0]'
+                : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
             }`}
           >
             Environment
@@ -120,8 +120,8 @@ export default function DatasetDistributions({
             onClick={() => setActiveMainTab('state-space')}
             className={`px-4 py-2 text-sm font-medium transition-colors relative ${
               activeMainTab === 'state-space'
-                ? 'text-[#d4d4d4]'
-                : 'text-[#8a8a8a] hover:text-[#b4b4b4]'
+                ? 'text-[#e3e8f0]'
+                : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
             }`}
           >
             State-Space
@@ -133,8 +133,8 @@ export default function DatasetDistributions({
             onClick={() => setActiveMainTab('action-space')}
             className={`px-4 py-2 text-sm font-medium transition-colors relative ${
               activeMainTab === 'action-space'
-                ? 'text-[#d4d4d4]'
-                : 'text-[#8a8a8a] hover:text-[#b4b4b4]'
+                ? 'text-[#e3e8f0]'
+                : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
             }`}
           >
             Action-Space
@@ -144,54 +144,28 @@ export default function DatasetDistributions({
           </button>
         </div>
 
-        {/* Sub-tabs for Environment */}
-        {activeMainTab === 'environment' && (
+        {/* Sub-tabs for Environment - show all available distributions */}
+        {activeMainTab === 'environment' && aresDistributions.length > 0 && (
           <div className="flex gap-0 mb-3 border-b border-[#2a2a2a]">
-            {objectsDist && (
-              <button
-                onClick={() => setActiveEnvSubTab('objects')}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${
-                  activeEnvSubTab === 'objects'
-                    ? 'text-[#d4d4d4]'
-                    : 'text-[#8a8a8a] hover:text-[#b4b4b4]'
-                }`}
-              >
-                Objects
-                {activeEnvSubTab === 'objects' && (
-                  <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-                )}
-              </button>
-            )}
-            {lightingDist && (
-              <button
-                onClick={() => setActiveEnvSubTab('lighting')}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${
-                  activeEnvSubTab === 'lighting'
-                    ? 'text-[#d4d4d4]'
-                    : 'text-[#8a8a8a] hover:text-[#b4b4b4]'
-                }`}
-              >
-                Lighting
-                {activeEnvSubTab === 'lighting' && (
-                  <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-                )}
-              </button>
-            )}
-            {materialsDist && (
-              <button
-                onClick={() => setActiveEnvSubTab('materials')}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${
-                  activeEnvSubTab === 'materials'
-                    ? 'text-[#d4d4d4]'
-                    : 'text-[#8a8a8a] hover:text-[#b4b4b4]'
-                }`}
-              >
-                Materials
-                {activeEnvSubTab === 'materials' && (
-                  <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-                )}
-              </button>
-            )}
+            {aresDistributions.map((dist, idx) => {
+              const tabKey = dist.title.toLowerCase().replace(/\s+/g, '-')
+              return (
+                <button
+                  key={idx}
+                  onClick={() => setActiveEnvSubTab(tabKey as EnvironmentSubTab)}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${
+                    activeEnvSubTab === tabKey
+                      ? 'text-[#e3e8f0]'
+                      : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
+                  }`}
+                >
+                  {dist.title}
+                  {activeEnvSubTab === tabKey && (
+                    <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
+                  )}
+                </button>
+              )
+            })}
           </div>
         )}
 
@@ -202,8 +176,8 @@ export default function DatasetDistributions({
               onClick={() => setActiveStateSubTab('trajectory')}
               className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${
                 activeStateSubTab === 'trajectory'
-                  ? 'text-[#d4d4d4]'
-                  : 'text-[#8a8a8a] hover:text-[#b4b4b4]'
+                  ? 'text-[#e3e8f0]'
+                  : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
               }`}
             >
               Trajectory
@@ -218,57 +192,35 @@ export default function DatasetDistributions({
         <div className="bg-[#1a1a1a] border border-[#2a2a2a]">
           {activeMainTab === 'environment' && (
             <>
-              {aresInitialized && activeEnvSubTab === 'objects' && objectsDist && objectsDist.figure && (
-                <Plot 
-                  data={objectsDist.figure.data} 
-                  layout={objectsDist.figure.layout} 
-                  config={{ displayModeBar: false }} 
-                  style={{ width: '100%', height: '400px' }}
-                />
-              )}
-              {aresInitialized && activeEnvSubTab === 'lighting' && lightingDist && lightingDist.figure && (
-                <Plot 
-                  data={lightingDist.figure.data} 
-                  layout={lightingDist.figure.layout} 
-                  config={{ displayModeBar: false }} 
-                  style={{ width: '100%', height: '400px' }}
-                />
-              )}
-              {aresInitialized && activeEnvSubTab === 'materials' && materialsDist && materialsDist.figure && (
-                <Plot 
-                  data={materialsDist.figure.data} 
-                  layout={materialsDist.figure.layout} 
-                  config={{ displayModeBar: false }} 
-                  style={{ width: '100%', height: '400px' }}
-                />
-              )}
-              {!aresInitialized && (
+              {aresInitialized && aresDistributions.length > 0 ? (
+                <div className="p-4">
+                  {aresDistributions.map((dist, idx) => {
+                    const tabKey = dist.title.toLowerCase().replace(/\s+/g, '-')
+                    // Show plot if it matches active tab, or show all if no tab is selected
+                    const shouldShow = !activeEnvSubTab || activeEnvSubTab === tabKey
+                    return shouldShow && dist.figure ? (
+                      <Plot 
+                        key={idx}
+                        data={dist.figure.data} 
+                        layout={dist.figure.layout} 
+                        config={{ displayModeBar: false }} 
+                        style={{ width: '100%', height: '400px' }}
+                      />
+                    ) : null
+                  })}
+                </div>
+              ) : !aresInitialized ? (
                 <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
                   Loading distributions...
                 </div>
-              )}
-              {aresInitialized && activeEnvSubTab === 'objects' && !objectsDist && (
-                <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
-                  No Objects distribution available
-                </div>
-              )}
-              {aresInitialized && activeEnvSubTab === 'lighting' && !lightingDist && (
-                <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
-                  No Lighting distribution available
-                </div>
-              )}
-              {aresInitialized && activeEnvSubTab === 'materials' && !materialsDist && (
-                <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
-                  No Materials distribution available
-                </div>
-              )}
+              ) : null}
             </>
           )}
           {activeMainTab === 'state-space' && activeStateSubTab === 'trajectory' && (
             <Plot data={trajPlot.data} layout={trajPlot.layout} config={trajPlot.config} />
           )}
           {activeMainTab === 'action-space' && (
-            <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
+            <div className="h-[400px] flex items-center justify-center text-[#b5becb] text-xs">
               {/* Empty for action-space */}
             </div>
           )}

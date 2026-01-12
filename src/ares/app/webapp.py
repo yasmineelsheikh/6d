@@ -122,8 +122,8 @@ def main() -> None:
         )
     st.divider()
 
-    section_display = "data distributions"
-    with error_context(section_display), timer_context(section_display):
+            section_display = "data distributions"
+            with error_context(section_display), timer_context(section_display):
         data_distributation_visualizations = data_distributions_section(filtered_df)
 
     section_success_rate = "success estimate analytics"
@@ -139,8 +139,8 @@ def main() -> None:
         time_series_visualizations = time_series_analytics_section(filtered_df)
     st.divider()
 
-    section_video_grid = "video grid"
-    with error_context(section_video_grid), timer_context(section_video_grid):
+            section_video_grid = "video grid"
+            with error_context(section_video_grid), timer_context(section_video_grid):
         video_grid_section(filtered_df)
     st.divider()
 
