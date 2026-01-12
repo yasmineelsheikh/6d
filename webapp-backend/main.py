@@ -346,6 +346,7 @@ dataset_paths: Dict[str, str] = {}
 class DatasetLoadRequest(BaseModel):
     dataset_path: str
     dataset_name: str
+    is_s3: Optional[bool] = False
 
 class AugmentationRequest(BaseModel):
     dataset_name: str
@@ -419,13 +420,118 @@ def count_episodes_from_parquet(dataset_path: str) -> int:
 async def root():
     return {"message": "Ares Platform API", "version": "1.0.0"}
 
+def download_from_s3(s3_path: str, local_path: Path) -> Path:
+    """Download a folder from S3 to a local path."""
+    try:
+        # Parse S3 path: s3://bucket-name/path/to/folder
+        if not s3_path.startswith("s3://"):
+            raise ValueError("S3 path must start with 's3://'")
+        
+        s3_path = s3_path[5:]  # Remove 's3://'
+        parts = s3_path.split("/", 1)
+        bucket_name = parts[0]
+        s3_prefix = parts[1] if len(parts) > 1 else ""
+        
+        # Create local directory
+        local_path.mkdir(parents=True, exist_ok=True)
+        
+        # List and download all objects with the prefix
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket_name, Prefix=s3_prefix)
+        
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+            for obj in page['Contents']:
+                s3_key = obj['Key']
+                # Get relative path from prefix
+                if s3_prefix:
+                    relative_path = s3_key[len(s3_prefix):].lstrip('/')
+                else:
+                    relative_path = s3_key
+                
+                if not relative_path:
+                    continue
+                
+                local_file_path = local_path / relative_path
+                local_file_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Download file
+                s3.download_file(bucket_name, s3_key, str(local_file_path))
+        
+        return local_path
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading from S3: {str(e)}")
+
+@app.post("/api/datasets/upload")
+async def upload_dataset(
+    files: List[UploadFile] = File(...),
+    dataset_name: str = Form(...),
+    environment: str = Form(""),
+    axes: str = Form("[]")
+):
+    """Upload a dataset folder from local files."""
+    try:
+        # Create temporary directory for uploaded dataset
+        upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save all uploaded files preserving directory structure
+        for file in files:
+            # Get the relative path from the file's path (if available)
+            file_path = file.filename
+            if not file_path:
+                continue
+            
+            # Create full path
+            full_path = upload_dir / file_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write file
+            with open(full_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+        
+        # Validate dataset structure
+        if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists():
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid LeRobot dataset structure. Directory must contain 'data/' and 'meta/' folders."
+            )
+        
+        # Run basic ingestion (no database creation)
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+        
+        from scripts.ingest_lerobot_dataset import ingest_dataset
+        count = ingest_dataset(str(upload_dir), None, dataset_name)
+        
+        # Store the dataset path for later use
+        dataset_paths[dataset_name] = str(upload_dir)
+        
+        return {
+            "success": True,
+            "dataset_name": dataset_name,
+            "dataset_path": str(upload_dir),
+            "episodes_ingested": count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error uploading dataset: {str(e)}")
+
 @app.post("/api/datasets/load")
 async def load_dataset(request: DatasetLoadRequest):
-    """Load a dataset from a local path."""
+    """Load a dataset from a local path or S3."""
     try:
-        dataset_path = Path(request.dataset_path)
-        if not dataset_path.exists():
-            raise HTTPException(status_code=400, detail=f"Path does not exist: {request.dataset_path}")
+        if request.is_s3:
+            # Download from S3 to temporary directory
+            temp_dir = project_root / "data" / "temp_datasets" / request.dataset_name
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            dataset_path = download_from_s3(request.dataset_path, temp_dir)
+        else:
+            dataset_path = Path(request.dataset_path)
+            if not dataset_path.exists():
+                raise HTTPException(status_code=400, detail=f"Path does not exist: {request.dataset_path}")
         
         if not (dataset_path / "data").exists() or not (dataset_path / "meta").exists():
             raise HTTPException(

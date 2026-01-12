@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight } from 'lucide-react'
+import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight, Folder, Cloud } from 'lucide-react'
 import DatasetOverview from '@/components/DatasetOverview'
 import DatasetDistributions from '@/components/DatasetDistributions'
 import EpisodePreview from '@/components/EpisodePreview'
@@ -69,6 +69,9 @@ export default function Home() {
   const [datasetName, setDatasetName] = useState('')
   const [uploadLoading, setUploadLoading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [uploadMode, setUploadMode] = useState<'local' | 's3'>('local')
+  const [uploadedFiles, setUploadedFiles] = useState<FileList | null>(null)
+  const [s3Path, setS3Path] = useState('')
   
   // Plot configuration state
   const [environment, setEnvironment] = useState<'Indoor' | 'Outdoor' | ''>('')
@@ -106,23 +109,64 @@ export default function Home() {
   const [tasks, setTasks] = useState<TaskData[]>([])
   
   const handleLoadDataset = async () => {
-    if (!datasetPath || !datasetName) return
+    if (uploadMode === 'local' && !uploadedFiles) return
+    if (uploadMode === 's3' && !s3Path) return
+    
+    // Auto-generate dataset name if not set
+    let finalDatasetName = datasetName
+    if (!finalDatasetName) {
+      if (uploadMode === 'local' && uploadedFiles) {
+        const firstFile = uploadedFiles[0]
+        const relativePath = (firstFile as any).webkitRelativePath || firstFile.name
+        finalDatasetName = relativePath.split('/')[0]
+      } else if (uploadMode === 's3' && s3Path) {
+        const pathParts = s3Path.replace('s3://', '').split('/').filter(p => p)
+        finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+      } else {
+        return // Cannot proceed without a dataset name
+      }
+      setDatasetName(finalDatasetName)
+    }
 
     setUploadLoading(true)
     setUploadSuccess(false)
     setError(null)
 
     try {
-      const response = await fetch('/api/datasets/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dataset_path: datasetPath,
-          dataset_name: datasetName,
-          environment: environment || null,
-          axes: selectedAxes.length > 0 ? selectedAxes : null,
-        }),
-      })
+      let response: Response
+
+      if (uploadMode === 'local') {
+        // Upload files as FormData
+        const formData = new FormData()
+        if (uploadedFiles) {
+          Array.from(uploadedFiles).forEach((file) => {
+            // Preserve directory structure by using relative path
+            const relativePath = (file as any).webkitRelativePath || file.name
+            formData.append('files', file, relativePath)
+          })
+        }
+        formData.append('dataset_name', finalDatasetName)
+        formData.append('environment', environment || '')
+        formData.append('axes', JSON.stringify(selectedAxes.length > 0 ? selectedAxes : []))
+
+        response = await fetch('/api/datasets/upload', {
+          method: 'POST',
+          body: formData,
+        })
+      } else {
+        // S3 path
+        response = await fetch('/api/datasets/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dataset_path: s3Path,
+            dataset_name: finalDatasetName,
+            environment: environment || null,
+            axes: selectedAxes.length > 0 ? selectedAxes : null,
+            is_s3: true,
+          }),
+        })
+      }
 
       if (!response.ok) {
         const error = await response.json()
@@ -131,10 +175,24 @@ export default function Home() {
 
       setUploadSuccess(true)
       // Load dataset on current page
-      await handleDatasetLoaded(datasetName)
+      await handleDatasetLoaded(finalDatasetName)
     } catch (error: any) {
       setError(error.message)
       setUploadLoading(false)
+    }
+  }
+
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files && files.length > 0) {
+      setUploadedFiles(files)
+      // Set dataset path to show selected folder name
+      const firstFile = files[0]
+      const relativePath = (firstFile as any).webkitRelativePath || firstFile.name
+      const folderName = relativePath.split('/')[0]
+      setDatasetPath(folderName)
+      // Auto-generate dataset name from folder name
+      setDatasetName(folderName)
     }
   }
 
@@ -418,20 +476,93 @@ export default function Home() {
             <div className="flex items-start gap-4 mb-4">
               {/* Input boxes */}
               <div className="flex-1 flex items-center gap-4">
-                <input
-                  type="text"
-                  placeholder="path/to/dataset"
-                  value={datasetPath}
-                  onChange={(e) => setDatasetPath(e.target.value)}
-                  className="w-[576px] px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                />
-                <input
-                  type="text"
-                  placeholder="Dataset name"
-                  value={datasetName}
-                  onChange={(e) => setDatasetName(e.target.value)}
-                  className="w-[240px] px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                />
+                {/* Upload Mode Toggle */}
+                <div className="flex items-center gap-2 border border-[#2a2a2a] rounded p-1 bg-[#1a1a1a]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadMode('local')
+                      setUploadedFiles(null)
+                      setDatasetPath('')
+                      setS3Path('')
+                    }}
+                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                      uploadMode === 'local'
+                        ? 'bg-[#4b6671] text-white'
+                        : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
+                    }`}
+                  >
+                    <Folder className="w-3 h-3" />
+                    Local
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadMode('s3')
+                      setUploadedFiles(null)
+                      setDatasetPath('')
+                    }}
+                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                      uploadMode === 's3'
+                        ? 'bg-[#4b6671] text-white'
+                        : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
+                    }`}
+                  >
+                    <Cloud className="w-3 h-3" />
+                    S3
+                  </button>
+                </div>
+
+                {/* Local Upload */}
+                {uploadMode === 'local' && (
+                  <div className="relative w-[576px]">
+                    <input
+                      type="file"
+                      id="folder-upload"
+                      {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+                      multiple
+                      onChange={handleFolderSelect}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="folder-upload"
+                      className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors cursor-pointer flex items-center gap-2 hover:bg-[#252525]"
+                    >
+                      <Folder className="w-4 h-4 flex-shrink-0" />
+                      <span className="flex-1 truncate">
+                        {datasetPath || 'Select folder...'}
+                      </span>
+                      {uploadedFiles && (
+                        <span className="text-[#9aa4b5] text-[10px]">
+                          ({uploadedFiles.length} files)
+                        </span>
+                      )}
+                    </label>
+                  </div>
+                )}
+
+                {/* S3 Path Input */}
+                {uploadMode === 's3' && (
+                  <input
+                    type="text"
+                    placeholder="s3://bucket-name/path/to/dataset"
+                    value={s3Path}
+                    onChange={(e) => {
+                      const path = e.target.value
+                      setS3Path(path)
+                      setDatasetPath(path)
+                      // Auto-generate dataset name from S3 path (last part)
+                      if (path) {
+                        const pathParts = path.replace('s3://', '').split('/').filter(p => p)
+                        const datasetNameFromPath = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+                        setDatasetName(datasetNameFromPath)
+                      } else {
+                        setDatasetName('')
+                      }
+                    }}
+                    className="w-[576px] px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                  />
+                )}
               </div>
               
               {/* Settings on far right in fixed-width column */}
@@ -520,7 +651,7 @@ export default function Home() {
             <div className="flex justify-center mt-10">
               <button
                 onClick={handleLoadDataset}
-                disabled={uploadLoading || !datasetPath || !datasetName}
+                disabled={uploadLoading || (uploadMode === 'local' && !uploadedFiles) || (uploadMode === 's3' && !s3Path)}
                 className="w-1/4 px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
                 style={{ backgroundColor: '#4b6671' }}
               >
