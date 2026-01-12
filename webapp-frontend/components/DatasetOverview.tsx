@@ -15,17 +15,17 @@ export default function DatasetOverview({ datasetInfo }: DatasetOverviewProps) {
 
   return (
     <div>
-      <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Overview</h2>
+      <h2 className="text-xs font-medium mb-3 text-[#e3e8f0]">Dataset Overview</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3">
-          <div className="text-xs text-[#8a8a8a] mb-1">Total Episodes</div>
-          <div className="text-lg font-medium text-[#d4d4d4]">
+          <div className="text-xs text-[#b5becb] mb-1">Total Episodes</div>
+          <div className="text-lg font-medium text-[#e3e8f0]">
             {datasetInfo.total_episodes}
           </div>
         </div>
         <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3">
-          <div className="text-xs text-[#8a8a8a] mb-1">Robot Type</div>
-          <div className="text-lg font-medium text-[#d4d4d4]">
+          <div className="text-xs text-[#b5becb] mb-1">Robot Type</div>
+          <div className="text-lg font-medium text-[#e3e8f0]">
             {datasetInfo.robot_type}
           </div>
         </div>

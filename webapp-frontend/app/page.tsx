@@ -1,14 +1,20 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Upload, Play, Download, Loader2, CheckCircle2, XCircle, Filter } from 'lucide-react'
-import DatasetUpload from '@/components/DatasetUpload'
+import { useRouter } from 'next/navigation'
+import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight } from 'lucide-react'
 import DatasetOverview from '@/components/DatasetOverview'
 import DatasetDistributions from '@/components/DatasetDistributions'
 import EpisodePreview from '@/components/EpisodePreview'
 import AugmentationPanel from '@/components/AugmentationPanel'
 import OptimizationPanel from '@/components/OptimizationPanel'
 import TestingPanel from '@/components/TestingPanel'
+import SideMenu from '@/components/SideMenu'
+import TaskModal, { TaskData } from '@/components/TaskModal'
+import SettingsModal, { SettingsData } from '@/components/SettingsModal'
+import LoginModal from '@/components/LoginModal'
+import RegisterModal from '@/components/RegisterModal'
+import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 
@@ -49,14 +55,88 @@ export default function Home() {
   const [aresError, setAresError] = useState<string | null>(null)
   const [aresState, setAresState] = useState<AresState | null>(null)
   
-  // Embedding filters state
-  const [embeddingData, setEmbeddingData] = useState<Record<string, any>>({})
-  const [embeddingSelections, setEmbeddingSelections] = useState<Record<string, string[]>>({})
-  const [activeEmbeddingTab, setActiveEmbeddingTab] = useState<string | null>(null)
-  const [loadingEmbeddings, setLoadingEmbeddings] = useState(false)
-  
   // Distributions state
   const [aresDistributions, setAresDistributions] = useState<Visualization[]>([])
+  
+  // Authentication
+  const { user, isAuthenticated, loading: authLoading, logout } = useAuth()
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false)
+  
+  // Upload form state
+  const router = useRouter()
+  const [datasetPath, setDatasetPath] = useState('')
+  const [datasetName, setDatasetName] = useState('')
+  const [uploadLoading, setUploadLoading] = useState(false)
+  const [uploadSuccess, setUploadSuccess] = useState(false)
+  
+  // Plot configuration state
+  const [environment, setEnvironment] = useState<'Indoor' | 'Outdoor' | ''>('')
+  const [selectedAxes, setSelectedAxes] = useState<string[]>([])
+  const [showAdvancedAxes, setShowAdvancedAxes] = useState(false)
+  const [isIndoor, setIsIndoor] = useState(false)
+  const [isOutdoor, setIsOutdoor] = useState(false)
+  
+  // Initialize all axes as checked by default when environment changes
+  useEffect(() => {
+    if (environment === 'Indoor') {
+      setSelectedAxes(['Objects', 'Lighting', 'Color/Material'])
+    } else if (environment === 'Outdoor') {
+      setSelectedAxes(['Objects', 'Lighting', 'Weather', 'Road Surface'])
+    } else {
+      setSelectedAxes([])
+    }
+  }, [environment])
+  
+  // Update environment based on checkbox states
+  useEffect(() => {
+    if (isIndoor && !isOutdoor) {
+      setEnvironment('Indoor')
+    } else if (isOutdoor && !isIndoor) {
+      setEnvironment('Outdoor')
+    } else if (!isIndoor && !isOutdoor) {
+      setEnvironment('')
+    }
+  }, [isIndoor, isOutdoor])
+  
+  // Side menu and modals state
+  const [isSideMenuOpen, setIsSideMenuOpen] = useState(false)
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
+  const [tasks, setTasks] = useState<TaskData[]>([])
+  
+  const handleLoadDataset = async () => {
+    if (!datasetPath || !datasetName) return
+
+    setUploadLoading(true)
+    setUploadSuccess(false)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/datasets/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataset_path: datasetPath,
+          dataset_name: datasetName,
+          environment: environment || null,
+          axes: selectedAxes.length > 0 ? selectedAxes : null,
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.detail || 'Failed to load dataset')
+      }
+
+      setUploadSuccess(true)
+      // Load dataset on current page
+      await handleDatasetLoaded(datasetName)
+    } catch (error: any) {
+      setError(error.message)
+      setUploadLoading(false)
+    }
+  }
 
   const handleDatasetLoaded = async (datasetName: string) => {
     setCurrentDataset(datasetName)
@@ -143,42 +223,6 @@ export default function Home() {
     init()
   }, [])
 
-  // Load embedding data
-  useEffect(() => {
-    if (!aresInitialized || !aresState?.has_embeddings) return
-
-    const loadEmbeddings = async () => {
-      setLoadingEmbeddings(true)
-      try {
-        const embeddingKeys = ['task_language_instruction', 'description_estimate']
-        const embeddingDataMap: Record<string, any> = {}
-        
-        for (const key of embeddingKeys) {
-          try {
-            const response = await fetch(`/api/ares/embeddings/${key}`)
-            if (response.ok) {
-              const data = await response.json()
-              embeddingDataMap[key] = data
-              if (!activeEmbeddingTab) {
-                setActiveEmbeddingTab(key)
-              }
-            }
-          } catch (err) {
-            console.error(`Error loading embedding ${key}:`, err)
-          }
-        }
-        
-        setEmbeddingData(embeddingDataMap)
-      } catch (err) {
-        console.error('Error loading embeddings:', err)
-      } finally {
-        setLoadingEmbeddings(false)
-      }
-    }
-
-    loadEmbeddings()
-  }, [aresInitialized, aresState?.has_embeddings])
-
   // Load distributions
   useEffect(() => {
     if (!aresInitialized) return
@@ -199,20 +243,164 @@ export default function Home() {
     loadDistributions()
   }, [aresInitialized])
 
+  // Load tasks from localStorage
+  useEffect(() => {
+    const savedTasks = localStorage.getItem('app_tasks')
+    if (savedTasks) {
+      try {
+        setTasks(JSON.parse(savedTasks))
+      } catch (e) {
+        console.error('Failed to parse saved tasks:', e)
+      }
+    }
+  }, [])
+
+  // Handle task save
+  const handleSaveTask = async (taskData: TaskData) => {
+    const newTask = {
+      ...taskData,
+      id: Date.now().toString(),
+      created_at: new Date().toISOString(),
+    }
+    const updatedTasks = [...tasks, newTask]
+    setTasks(updatedTasks)
+    localStorage.setItem('app_tasks', JSON.stringify(updatedTasks))
+    
+    // Optionally send to backend
+    try {
+      await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTask),
+      })
+    } catch (err) {
+      console.error('Failed to save task to backend:', err)
+      // Continue anyway - task is saved locally
+    }
+  }
+
+  // Handle settings save
+  const handleSaveSettings = async (settingsData: SettingsData) => {
+    // Settings are already saved to localStorage in the modal
+    // Optionally send to backend
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settingsData),
+      })
+    } catch (err) {
+      console.error('Failed to save settings to backend:', err)
+      // Continue anyway - settings are saved locally
+    }
+  }
+
+  // Handle dataset export
+  const handleExportDataset = async () => {
+    if (!currentDataset) return
+    try {
+      const response = await fetch(`/api/datasets/${currentDataset}/export?format=csv`)
+      if (!response.ok) {
+        throw new Error('Failed to export dataset')
+      }
+      const data = await response.json()
+      const blob = new Blob([data.content], { type: 'text/csv' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = data.filename || `${currentDataset}.csv`
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Export error:', err)
+      alert('Failed to export dataset')
+    }
+  }
+
+  // Show login modal if not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      setIsLoginModalOpen(true)
+    }
+  }, [authLoading, isAuthenticated])
+
+  // Show loading screen while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[#4b6671]" />
+      </div>
+    )
+  }
+
+  // Show login/register if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <>
+        <LoginModal
+          isOpen={isLoginModalOpen}
+          onClose={() => setIsLoginModalOpen(false)}
+          onSwitchToRegister={() => {
+            setIsLoginModalOpen(false)
+            setIsRegisterModalOpen(true)
+          }}
+        />
+        <RegisterModal
+          isOpen={isRegisterModalOpen}
+          onClose={() => setIsRegisterModalOpen(false)}
+          onSwitchToLogin={() => {
+            setIsRegisterModalOpen(false)
+            setIsLoginModalOpen(true)
+          }}
+        />
+      </>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-[#1a1a1a] text-[#d4d4d4]">
+      {/* Side Menu */}
+      <SideMenu
+        isOpen={isSideMenuOpen}
+        onToggle={() => setIsSideMenuOpen(!isSideMenuOpen)}
+        onAddTask={() => window.location.reload()}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onLogout={logout}
+      />
+
+      {/* Task Modal */}
+      <TaskModal
+        isOpen={isTaskModalOpen}
+        onClose={() => setIsTaskModalOpen(false)}
+        onSave={handleSaveTask}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onSave={handleSaveSettings}
+      />
+
       {/* Header */}
       <header className="border-b border-[#2a2a2a] bg-[#222222] sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-center justify-between h-10">
-            <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between h-10">
+          <div className="flex items-center h-full">
+            <button
+              onClick={() => setIsSideMenuOpen(!isSideMenuOpen)}
+              className="px-4 h-full text-[#d4d4d4] hover:text-white hover:bg-[#2a2a2a] transition-colors border-r border-[#2a2a2a]"
+              aria-label="Toggle menu"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-4 px-6 flex-1">
               <h1 className="text-sm font-medium tracking-wide text-white">
                 6d labs
               </h1>
               {currentDataset && (
                 <>
                   <div className="h-3 w-px bg-[#2a2a2a]" />
-                  <span className="text-xs text-[#8a8a8a] font-mono">
+                  <span className="text-xs text-[#b5becb] font-mono">
                     {currentDataset}
                   </span>
                 </>
@@ -226,7 +414,135 @@ export default function Home() {
         {/* Upload Data Section */}
         <div className="mb-8">
           <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Upload Data</h2>
-          <DatasetUpload onDatasetLoaded={handleDatasetLoaded} />
+          <div className="bg-[#222222] border border-[#2a2a2a] p-6">
+            <div className="flex items-start gap-4 mb-4">
+              {/* Input boxes */}
+              <div className="flex-1 flex items-center gap-4">
+                <input
+                  type="text"
+                  placeholder="path/to/dataset"
+                  value={datasetPath}
+                  onChange={(e) => setDatasetPath(e.target.value)}
+                  className="w-[576px] px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                />
+                <input
+                  type="text"
+                  placeholder="Dataset name"
+                  value={datasetName}
+                  onChange={(e) => setDatasetName(e.target.value)}
+                  className="w-[240px] px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                />
+              </div>
+              
+              {/* Settings on far right in fixed-width column */}
+              <div className="flex items-center gap-3 flex-shrink-0 w-72 justify-end relative">
+                {/* Environment Selection - Checkboxes */}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isIndoor}
+                      onChange={(e) => {
+                        setIsIndoor(e.target.checked)
+                        if (e.target.checked) {
+                          setIsOutdoor(false)
+                        }
+                      }}
+                      className="w-3 h-3 accent-[#4b6671] cursor-pointer"
+                    />
+                    <span className="text-xs text-[#d4d4d4]">Indoor</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isOutdoor}
+                      onChange={(e) => {
+                        setIsOutdoor(e.target.checked)
+                        if (e.target.checked) {
+                          setIsIndoor(false)
+                        }
+                      }}
+                      className="w-3 h-3 accent-[#4b6671] cursor-pointer"
+                    />
+                    <span className="text-xs text-[#d4d4d4]">Outdoor</span>
+                  </label>
+                </div>
+
+                {/* Advanced Axes Toggle - inline with Indoor/Outdoor */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedAxes(!showAdvancedAxes)}
+                    className="flex items-center gap-1 text-xs text-[#8a8a8a] hover:text-[#d4d4d4] transition-colors"
+                  >
+                    {showAdvancedAxes ? (
+                      <ChevronDown className="w-3 h-3" />
+                    ) : (
+                      <ChevronRight className="w-3 h-3" />
+                    )}
+                    <span>Axes</span>
+                  </button>
+
+                  {/* Axes dropdown - absolutely positioned so it doesn't affect layout */}
+                  {showAdvancedAxes && (isIndoor || isOutdoor) && (
+                    <div className="absolute top-full right-0 mt-1 z-50 bg-[#222222] rounded px-2 py-2">
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        {(isIndoor
+                          ? ['Objects', 'Lighting', 'Color/Material']
+                          : ['Objects', 'Lighting', 'Weather', 'Road Surface']
+                        ).map((axis) => (
+                          <label
+                            key={axis}
+                            className="flex items-center gap-1 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedAxes.includes(axis)}
+                              onChange={() => {
+                                const newAxes = selectedAxes.includes(axis)
+                                  ? selectedAxes.filter(a => a !== axis)
+                                  : [...selectedAxes, axis]
+                                setSelectedAxes(newAxes)
+                              }}
+                              className="w-3 h-3 accent-[#4b6671] cursor-pointer"
+                            />
+                            <span className="text-xs text-[#d4d4d4]">{axis}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {/* Load Dataset Button - 25% width, centered with larger top gap for axes */}
+            <div className="flex justify-center mt-10">
+              <button
+                onClick={handleLoadDataset}
+                disabled={uploadLoading || !datasetPath || !datasetName}
+                className="w-1/4 px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
+                style={{ backgroundColor: '#4b6671' }}
+              >
+                {uploadLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading...
+                  </>
+                ) : uploadSuccess ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    Loaded
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    Load Dataset
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
 
         {error && (
@@ -238,92 +554,7 @@ export default function Home() {
 
         {loading && (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-[#666666]" />
-          </div>
-        )}
-
-        {/* Embedding Data Filters Section */}
-        {aresInitialized && aresState?.has_embeddings && (
-          <div className="mb-8">
-            <div className="bg-[#222222] border border-[#2a2a2a] p-6">
-              <h2 className="text-xs font-medium mb-4 text-[#d4d4d4]">Embedding Data Filters</h2>
-              
-              {Object.keys(embeddingData).length === 0 ? (
-                <div className="text-xs text-[#8a8a8a] mb-4">
-                  {loadingEmbeddings ? 'Loading embedding data...' : 'No embedding data available.'}
-                </div>
-              ) : (
-                <>
-                  {/* Embedding type tabs */}
-                  <div className="border-b border-[#2a2a2a] mb-4">
-                    <div className="flex gap-1">
-                      {Object.keys(embeddingData).map((key) => (
-                        <button
-                          key={key}
-                          onClick={() => setActiveEmbeddingTab(key)}
-                          className={cn(
-                            "px-4 py-2 text-xs font-medium transition-colors",
-                            activeEmbeddingTab === key
-                              ? "text-[#d4d4d4] border-b-2 border-[#4b6671]"
-                              : "text-[#8a8a8a] hover:text-[#d4d4d4]"
-                          )}
-                        >
-                          {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Active embedding plot */}
-                  {activeEmbeddingTab && embeddingData[activeEmbeddingTab] && (
-                    <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
-                      <div className="mb-2 text-xs text-[#8a8a8a]">
-                        {embeddingData[activeEmbeddingTab].point_count} points. 
-                        Use box select, lasso select, or click points to filter data.
-                      </div>
-                      {embeddingData[activeEmbeddingTab].figure && (
-                        <Plot
-                          data={embeddingData[activeEmbeddingTab].figure.data}
-                          layout={{
-                            ...embeddingData[activeEmbeddingTab].figure.layout,
-                            dragmode: 'lasso',
-                            selectdirection: 'diagonal',
-                          }}
-                          config={{
-                            displayModeBar: false,
-                            modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
-                          }}
-                          style={{ width: '100%', height: '500px' }}
-                          onSelected={(data: any) => {
-                            if (data && data.points) {
-                              const selectedIds = data.points
-                                .map((p: any) => p.customdata?.[1] || p.customdata?.[0])
-                                .filter((id: any) => id !== undefined)
-                              
-                              setEmbeddingSelections({
-                                ...embeddingSelections,
-                                [activeEmbeddingTab]: selectedIds,
-                              })
-                            }
-                          }}
-                          onDeselect={() => {
-                            setEmbeddingSelections({
-                              ...embeddingSelections,
-                              [activeEmbeddingTab]: [],
-                            })
-                          }}
-                        />
-                      )}
-                      {embeddingSelections[activeEmbeddingTab] && embeddingSelections[activeEmbeddingTab].length > 0 && (
-                        <div className="mt-2 text-xs text-[#8a8a8a]">
-                          {embeddingSelections[activeEmbeddingTab].length} points selected
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+            <Loader2 className="w-5 h-5 animate-spin text-[#9aa4b5]" />
           </div>
         )}
 
@@ -355,8 +586,8 @@ export default function Home() {
                     className={cn(
                       "px-4 py-2 text-sm font-medium transition-colors relative",
                       curationTab === 'automated'
-                        ? "text-[#d4d4d4]"
-                        : "text-[#8a8a8a] hover:text-[#b4b4b4]"
+                        ? "text-[#e3e8f0]"
+                        : "text-[#9aa4b5] hover:text-[#e3e8f0]"
                     )}
                   >
                     Automated
@@ -369,8 +600,8 @@ export default function Home() {
                     className={cn(
                       "px-4 py-2 text-sm font-medium transition-colors relative",
                       curationTab === 'manual'
-                        ? "text-[#d4d4d4]"
-                        : "text-[#8a8a8a] hover:text-[#b4b4b4]"
+                        ? "text-[#e3e8f0]"
+                        : "text-[#9aa4b5] hover:text-[#e3e8f0]"
                     )}
                   >
                     Manual
@@ -408,12 +639,44 @@ export default function Home() {
 
         {!currentDataset && !loading && (
           <div className="text-center py-16">
-            <p className="text-[#8a8a8a] text-xs">
+            <p className="text-[#b5becb] text-xs">
               Load a dataset to get started
             </p>
           </div>
         )}
+
+        {/* Export Section */}
+        {currentDataset && !loading && (
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={handleExportDataset}
+              className="px-4 py-2 text-xs bg-[#4b6671] text-white hover:bg-[#3d5560] transition-colors border border-[#2a2a2a]"
+            >
+              Export Dataset (CSV)
+            </button>
+          </div>
+        )}
       </main>
+
+      {/* Login Modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onSwitchToRegister={() => {
+          setIsLoginModalOpen(false)
+          setIsRegisterModalOpen(true)
+        }}
+      />
+
+      {/* Register Modal */}
+      <RegisterModal
+        isOpen={isRegisterModalOpen}
+        onClose={() => setIsRegisterModalOpen(false)}
+        onSwitchToLogin={() => {
+          setIsRegisterModalOpen(false)
+          setIsLoginModalOpen(true)
+        }}
+      />
     </div>
   )
 }

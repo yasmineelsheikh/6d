@@ -45,8 +45,8 @@ export default function DatasetUpload({ onDatasetLoaded }: DatasetUploadProps) {
 
   return (
     <div className="bg-[#222222] border border-[#2a2a2a] p-4">
-      <h2 className="text-xs font-medium mb-3 flex items-center gap-1.5 text-[#d4d4d4]">
-        <Upload className="w-3.5 h-3.5 text-[#8a8a8a]" />
+      <h2 className="text-xs font-medium mb-3 flex items-center gap-1.5 text-[#e3e8f0]">
+        <Upload className="w-3.5 h-3.5 text-[#b5becb]" />
         Upload Data
       </h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
