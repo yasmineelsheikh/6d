@@ -47,7 +47,6 @@ export default function Home() {
   const [curatedData, setCuratedData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [curationTab, setCurationTab] = useState<'automated' | 'manual'>('automated')
   
   // ARES state
   const [aresInitialized, setAresInitialized] = useState(false)
@@ -174,8 +173,8 @@ export default function Home() {
       }
 
       setUploadSuccess(true)
-      // Load dataset on current page
-      await handleDatasetLoaded(finalDatasetName)
+      // Navigate to dataset page
+      router.push(`/dataset/${encodeURIComponent(finalDatasetName)}`)
     } catch (error: any) {
       setError(error.message)
       setUploadLoading(false)
@@ -423,7 +422,12 @@ export default function Home() {
         onToggle={() => setIsSideMenuOpen(!isSideMenuOpen)}
         onAddTask={() => window.location.reload()}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
-        onLogout={logout}
+        onLogout={() => {
+          logout()
+          setIsLoginModalOpen(true)
+          setIsRegisterModalOpen(false)
+          router.push('/')
+        }}
       />
 
       {/* Task Modal */}
@@ -710,59 +714,31 @@ export default function Home() {
           <div className="mb-8">
             <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Curation</h2>
             <div className="bg-[#222222] border border-[#2a2a2a]">
-              <div className="border-b border-[#2a2a2a]">
-                <div className="flex">
-                  <button
-                    onClick={() => setCurationTab('automated')}
-                    className={cn(
-                      "px-4 py-2 text-sm font-medium transition-colors relative",
-                      curationTab === 'automated'
-                        ? "text-[#e3e8f0]"
-                        : "text-[#9aa4b5] hover:text-[#e3e8f0]"
-                    )}
-                  >
-                    Automated
-                    {curationTab === 'automated' && (
-                      <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setCurationTab('manual')}
-                    className={cn(
-                      "px-4 py-2 text-sm font-medium transition-colors relative",
-                      curationTab === 'manual'
-                        ? "text-[#e3e8f0]"
-                        : "text-[#9aa4b5] hover:text-[#e3e8f0]"
-                    )}
-                  >
-                    Manual
-                    {curationTab === 'manual' && (
-                      <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-                    )}
-                  </button>
-                </div>
-              </div>
               <div className="p-6">
-                {curationTab === 'automated' ? (
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
-                    <AugmentationPanel
-                      datasetName={currentDataset}
-                      onComplete={handleAugmentationComplete}
-                    />
-                    <div className="mt-4 pt-4 border-t border-[#2a2a2a]">
+                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
+                  <AugmentationPanel
+                    datasetName={currentDataset}
+                    onComplete={handleAugmentationComplete}
+                  />
+                  <div className="mt-4 pt-4 border-t border-[#2a2a2a] opacity-50 pointer-events-none">
+                    <div className="relative">
                       <OptimizationPanel
                         datasetName={currentDataset}
                       />
+                      <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                        <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
+                      </div>
                     </div>
-                    <div className="mt-4 pt-4 border-t border-[#2a2a2a]">
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-[#2a2a2a] opacity-50 pointer-events-none">
+                    <div className="relative">
                       <TestingPanel datasetName={currentDataset} />
+                      <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                        <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
-                    {/* Manual tab - empty for now */}
-                  </div>
-                )}
+                </div>
               </div>
             </div>
           </div>
