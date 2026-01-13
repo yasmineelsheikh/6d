@@ -47,11 +47,6 @@ export default function OptimizationPanel({ datasetName, onComplete }: Optimizat
 
   return (
     <div>
-      <div className="mb-3">
-        <label className="block text-xs text-[#8a8a8a] mb-2">
-          Optimization
-        </label>
-      </div>
       <button
           onClick={handleRun}
           disabled={loading}

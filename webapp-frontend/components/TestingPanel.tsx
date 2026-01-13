@@ -50,9 +50,6 @@ export default function TestingPanel({ datasetName }: TestingPanelProps) {
   return (
     <div>
       <div className="mb-3">
-        <label className="block text-xs text-[#8a8a8a] mb-2">
-          Update with test data
-        </label>
         <input
           type="text"
           value={testDirectory}

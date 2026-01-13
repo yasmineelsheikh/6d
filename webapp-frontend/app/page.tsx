@@ -713,30 +713,38 @@ export default function Home() {
         {currentDataset && !loading && (
           <div className="mb-8">
             <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Curation</h2>
-            <div className="bg-[#222222] border border-[#2a2a2a]">
-              <div className="p-6">
+            <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-6">
+              {/* Augmentation Card */}
+              <div>
+                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Augmentation</h3>
                 <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
                   <AugmentationPanel
                     datasetName={currentDataset}
                     onComplete={handleAugmentationComplete}
                   />
-                  <div className="mt-4 pt-4 border-t border-[#2a2a2a] opacity-50 pointer-events-none">
-                    <div className="relative">
-                      <OptimizationPanel
-                        datasetName={currentDataset}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                        <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                      </div>
-                    </div>
+                </div>
+              </div>
+
+              {/* Optimization Card - Coming Soon */}
+              <div>
+                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Optimization</h3>
+                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
+                  <OptimizationPanel
+                    datasetName={currentDataset}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                    <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
                   </div>
-                  <div className="mt-4 pt-4 border-t border-[#2a2a2a] opacity-50 pointer-events-none">
-                    <div className="relative">
-                      <TestingPanel datasetName={currentDataset} />
-                      <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                        <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                      </div>
-                    </div>
+                </div>
+              </div>
+
+              {/* Update with Test Data Card - Coming Soon */}
+              <div>
+                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Update with test data</h3>
+                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
+                  <TestingPanel datasetName={currentDataset} />
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                    <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
                   </div>
                 </div>
               </div>
