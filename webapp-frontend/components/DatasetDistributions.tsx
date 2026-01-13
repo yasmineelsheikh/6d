@@ -117,30 +117,16 @@ export default function DatasetDistributions({
             )}
           </button>
           <button
-            onClick={() => setActiveMainTab('state-space')}
-            className={`px-4 py-2 text-sm font-medium transition-colors relative ${
-              activeMainTab === 'state-space'
-                ? 'text-[#e3e8f0]'
-                : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
-            }`}
+            type="button"
+            className="px-4 py-2 text-sm font-medium text-[#555c6b] cursor-not-allowed opacity-50"
           >
             State-Space
-            {activeMainTab === 'state-space' && (
-              <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-            )}
           </button>
           <button
-            onClick={() => setActiveMainTab('action-space')}
-            className={`px-4 py-2 text-sm font-medium transition-colors relative ${
-              activeMainTab === 'action-space'
-                ? 'text-[#e3e8f0]'
-                : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
-            }`}
+            type="button"
+            className="px-4 py-2 text-sm font-medium text-[#555c6b] cursor-not-allowed opacity-50"
           >
             Action-Space
-            {activeMainTab === 'action-space' && (
-              <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-            )}
           </button>
         </div>
 
@@ -169,22 +155,10 @@ export default function DatasetDistributions({
           </div>
         )}
 
-        {/* Sub-tabs for State-space */}
+        {/* Sub-tabs for State-space (disabled / coming soon) */}
         {activeMainTab === 'state-space' && (
-          <div className="flex gap-0 mb-3 border-b border-[#2a2a2a]">
-            <button
-              onClick={() => setActiveStateSubTab('trajectory')}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${
-                activeStateSubTab === 'trajectory'
-                  ? 'text-[#e3e8f0]'
-                  : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
-              }`}
-            >
-              Trajectory
-              {activeStateSubTab === 'trajectory' && (
-                <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
-              )}
-            </button>
+          <div className="mb-3 text-[10px] text-[#7a8291] italic">
+            State-space visualizations coming soon.
           </div>
         )}
 
@@ -216,12 +190,14 @@ export default function DatasetDistributions({
               ) : null}
             </>
           )}
-          {activeMainTab === 'state-space' && activeStateSubTab === 'trajectory' && (
-            <Plot data={trajPlot.data} layout={trajPlot.layout} config={trajPlot.config} />
+          {activeMainTab === 'state-space' && (
+            <div className="h-[400px] flex items-center justify-center text-[#7a8291] text-xs italic">
+              State-space plots are not yet available.
+            </div>
           )}
           {activeMainTab === 'action-space' && (
-            <div className="h-[400px] flex items-center justify-center text-[#b5becb] text-xs">
-              {/* Empty for action-space */}
+            <div className="h-[400px] flex items-center justify-center text-[#7a8291] text-xs italic">
+              Action-space plots are not yet available.
             </div>
           )}
         </div>

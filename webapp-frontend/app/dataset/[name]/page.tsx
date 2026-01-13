@@ -46,6 +46,8 @@ export default function DatasetPage() {
   const [curatedData, setCuratedData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [analysisView, setAnalysisView] = useState<'original' | 'new'>('original')
+  const [analysisSwitchEnabled, setAnalysisSwitchEnabled] = useState(false)
   
   // ARES state
   const [aresInitialized, setAresInitialized] = useState(false)
@@ -102,6 +104,7 @@ export default function DatasetPage() {
       if (!dataResponse.ok) throw new Error('Failed to load curated data')
       const data = await dataResponse.json()
       setCuratedData(data.data || [])
+      setAnalysisSwitchEnabled(true)
     } catch (err: any) {
       setError(err.message)
     }
@@ -365,15 +368,61 @@ export default function DatasetPage() {
         {/* Data Analysis Section */}
         {datasetName && !loading && (
           <div className="mb-8">
-            <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Data Analysis</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-medium text-[#d4d4d4]">Data Analysis</h2>
+              <div
+                className={`inline-flex rounded border border-[#2a2a2a] text-[11px] ${
+                  !analysisSwitchEnabled ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => analysisSwitchEnabled && setAnalysisView('original')}
+                  className={`px-2.5 py-1 transition-colors ${
+                    analysisView === 'original'
+                      ? 'bg-[#3b4454] text-[#e3e8f0]'
+                      : 'bg-transparent text-[#9aa4b5]'
+                  }`}
+                >
+                  Original
+                </button>
+                <button
+                  type="button"
+                  onClick={() => analysisSwitchEnabled && setAnalysisView('new')}
+                  className={`px-2.5 py-1 transition-colors border-l border-[#2a2a2a] ${
+                    analysisView === 'new'
+                      ? 'bg-[#3b4454] text-[#e3e8f0]'
+                      : 'bg-transparent text-[#9aa4b5]'
+                  }`}
+                >
+                  New
+                </button>
+              </div>
+            </div>
             <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-8">
-              <DatasetOverview datasetInfo={datasetInfo} />
-              <DatasetDistributions 
-                datasetName={datasetName} 
-                aresDistributions={aresDistributions}
-                aresInitialized={aresInitialized}
-              />
-              <EpisodePreview datasetData={datasetData} />
+              {analysisView === 'original' && (
+                <>
+                  <DatasetOverview datasetInfo={datasetInfo} />
+                  <DatasetDistributions 
+                    datasetName={datasetName} 
+                    aresDistributions={aresDistributions}
+                    aresInitialized={aresInitialized}
+                  />
+                  <EpisodePreview datasetData={datasetData} />
+                </>
+              )}
+              {analysisView === 'new' && (
+                <>
+                  {/* For now, show the same content as Original */}
+                  <DatasetOverview datasetInfo={datasetInfo} />
+                  <DatasetDistributions 
+                    datasetName={datasetName} 
+                    aresDistributions={aresDistributions}
+                    aresInitialized={aresInitialized}
+                  />
+                  <EpisodePreview datasetData={datasetData} />
+                </>
+              )}
             </div>
           </div>
         )}
@@ -382,30 +431,38 @@ export default function DatasetPage() {
         {datasetName && !loading && (
           <div className="mb-8">
             <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Curation</h2>
-            <div className="bg-[#222222] border border-[#2a2a2a]">
-              <div className="p-6">
+            <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-6">
+              {/* Augmentation Card */}
+              <div>
+                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Augmentation</h3>
                 <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
                   <AugmentationPanel
                     datasetName={datasetName}
                     onComplete={handleAugmentationComplete}
                   />
-                  <div className="mt-4 pt-4 border-t border-[#2a2a2a] opacity-50 pointer-events-none">
-                    <div className="relative">
-                      <OptimizationPanel
-                        datasetName={datasetName}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                        <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                      </div>
-                    </div>
+                </div>
+              </div>
+
+              {/* Optimization Card - Coming Soon */}
+              <div>
+                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Optimization</h3>
+                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
+                  <OptimizationPanel
+                    datasetName={datasetName}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                    <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
                   </div>
-                  <div className="mt-4 pt-4 border-t border-[#2a2a2a] opacity-50 pointer-events-none">
-                    <div className="relative">
-                      <TestingPanel datasetName={datasetName} />
-                      <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                        <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                      </div>
-                    </div>
+                </div>
+              </div>
+
+              {/* Update with Test Data Card - Coming Soon */}
+              <div>
+                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Update with test data</h3>
+                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
+                  <TestingPanel datasetName={datasetName} />
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                    <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
                   </div>
                 </div>
               </div>

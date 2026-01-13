@@ -49,15 +49,12 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
   return (
     <div>
       <div className="mb-3">
-        <label className="block text-xs text-[#8a8a8a] mb-2">
-          Augmentation
-        </label>
         <textarea
           value={taskDescription}
           onChange={(e) => setTaskDescription(e.target.value)}
           placeholder="Enter task description"
-          rows={4}
-          className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] resize-none transition-colors"
+          rows={2}
+          className="w-full px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] resize-none transition-colors"
         />
       </div>
       <button
