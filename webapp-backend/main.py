@@ -352,6 +352,7 @@ class AugmentationRequest(BaseModel):
     dataset_name: str
     prompt: str
     task_description: Optional[str] = ""
+    axes: Optional[List[str]] = None
 
 class OptimizationRequest(BaseModel):
     dataset_name: str
@@ -574,9 +575,9 @@ async def upload_dataset(
         import traceback
         error_trace = traceback.format_exc()
         print(f"Error uploading dataset: {error_trace}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail=f"Error uploading dataset: {str(e)}"
+            content={"detail": f"Error uploading dataset: {str(e)}"}
         )
 
 @app.post("/api/datasets/load")
@@ -738,53 +739,92 @@ async def get_dataset_distributions(dataset_name: str):
 async def run_augmentation(request: AugmentationRequest):
     """Run Cosmos augmentation on a dataset."""
     try:
-        # Ares database access removed
-        # Dataset path would need to be stored separately or passed in the request
-        # For now, we'll just handle the prompt upload and pod API call
+        import uuid
+        from datetime import datetime
+        from generate_prompt import generate_prompt_variations, generate_video_descriptions_with_vlm
+        from ares.models.shortcuts import get_vlm
         
-        # Use task_description if provided, otherwise use prompt (they are equivalent)
-        prompt_content = request.task_description if request.task_description else request.prompt
+        # Get VLM instance (same as used in ingestion)
+        # Default to gpt-4o, but could be configurable
+        vlm_name = "gpt-4o"  # Could be made configurable via request or config
+        vlm = get_vlm(vlm_name)
         
-        # Create prompt file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-            f.write(prompt_content)
-            prompt_path = f.name
+        # Get video directory path
+        from ares.constants import ARES_VIDEO_DIR
+        video_dir = Path(ARES_VIDEO_DIR) / request.dataset_name
         
-        try:
-            # Upload prompt to S3
-            s3.upload_file(
-                prompt_path,
-                S3_BUCKET,
-                f"input_data/{request.dataset_name}/prompt.txt"
+        if not video_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video directory not found for dataset '{request.dataset_name}'"
             )
-            
-            # Call pod API
-            response = requests.post(
-                POD_API_URL,
-                json={"dataset_name": request.dataset_name},
-                timeout=3600
+        
+        # Generate video descriptions using the same VLM as ingestion
+        print(f"Generating video descriptions for dataset: {request.dataset_name} using {vlm_name}")
+        descriptions = await generate_video_descriptions_with_vlm(
+            video_dir,
+            vlm,
+            task_description=request.task_description if request.task_description else None
+        )
+        
+        if not descriptions or all(not d for d in descriptions):
+            raise HTTPException(
+                status_code=400,
+                detail="No video descriptions were generated. Please ensure videos exist in the dataset."
             )
-            response.raise_for_status()
-            
-            result = response.json()
-            s3_output_url = result.get("s3_url")
-            
-            if not s3_output_url:
-                raise RuntimeError("Pod did not return an S3 URL")
-            
-            return {
-                "success": True,
-                "s3_url": s3_output_url,
-                "dataset_name": request.dataset_name
-            }
-        finally:
-            # Clean up temp file
-            if os.path.exists(prompt_path):
-                os.unlink(prompt_path)
+        
+        print(f"Generated {len(descriptions)} video descriptions")
+        
+        # Determine axes - use provided axes or default based on environment
+        axes = request.axes if request.axes else ["Objects", "Lighting", "Color/Material"]
+        
+        # Generate prompt variations
+        print(f"Generating prompt variations with axes: {axes}")
+        variations = generate_prompt_variations(
+            prompts=descriptions,
+            axes=axes,
+            task_description=request.task_description if request.task_description else None
+        )
+        
+        print(f"Generated {len(variations)} prompt variations")
+        
+        # Create directory for saving prompt variations
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        prompts_dir = project_root / "data" / "prompts" / request.dataset_name / f"{timestamp}_{unique_id}"
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save each variation to a .txt file
+        saved_files = []
+        for idx, (axis_changed, variation_text) in enumerate(variations):
+            filename = f"variation_{idx+1:04d}.txt"
+            file_path = prompts_dir / filename
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(variation_text)
+            saved_files.append(str(file_path.relative_to(project_root)))
+            print(f"Saved variation {idx+1} to {file_path}")
+        
+        # Upload entire folder to S3
+        s3_prefix = f"input_data/{request.dataset_name}/prompts/{timestamp}_{unique_id}"
+        print(f"Uploading prompt variations folder to S3: {s3_prefix}")
+        upload_folder_to_s3(str(prompts_dir), S3_BUCKET, s3_prefix)
+        
+        return {
+            "success": True,
+            "dataset_name": request.dataset_name,
+            "descriptions_count": len(descriptions),
+            "variations_count": len(variations),
+            "saved_files": saved_files,
+            "s3_prefix": s3_prefix,
+            "message": f"Generated {len(variations)} prompt variations and uploaded to S3"
+        }
                 
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"Augmentation error: {error_detail}")
         raise HTTPException(status_code=500, detail=f"Error running augmentation: {str(e)}")
 
 @app.post("/api/optimization/run")

@@ -122,15 +122,19 @@ def generate_automatic_visualizations(
     # Create histogram visualizations
     for col in histogram_cols:
         col_title = title_mapping.get(col, col.replace("_", " ").replace("-", " ").title())
+        # Create histogram with percentage on y-axis
+        fig = create_histogram(
+            df,
+            x=col,
+            color="#1f77b4",
+            title=col_title,
+            labels={col: col_title, "count": "Percentage of episodes (%)"},
+        )
+        # Convert to percentages by normalizing
+        fig.update_traces(histnorm='percent')
         visualizations.append(
             {
-                "figure": create_histogram(
-                    df,
-                    x=col,
-                    color="#1f77b4",
-                    title=col_title,
-                    labels={col: col_title, "count": "Count"},
-                ),
+                "figure": fig,
                 "title": col_title,
             }
         )
@@ -142,6 +146,7 @@ def generate_automatic_visualizations(
         # Create aggregation consistently for both boolean and non-boolean columns
         if pd.api.types.is_bool_dtype(df[col]):
             value_counts = df[col].astype(str).value_counts()
+            total = len(df)
         else:
             # Split comma-separated values and count each individual value
             # Handle NaN values by converting to empty string, then splitting
@@ -152,19 +157,24 @@ def generate_automatic_visualizations(
             split_values = split_values[split_values != '']
             split_values = split_values[split_values.str.lower() != 'nan']
             value_counts = split_values.value_counts()
+            # Total is the number of non-null values in the original column
+            total = df[col].notna().sum()
 
-        agg_data = value_counts.reset_index()
-        agg_data.columns = [col, "count"]
+        # Convert counts to percentages
+        percentages = (value_counts / total * 100).round(2)
+        
+        agg_data = percentages.reset_index()
+        agg_data.columns = [col, "percentage"]
 
         visualizations.append(
             {
                 "figure": create_bar_plot(
                     agg_data,
                     x=col,
-                    y="count",
+                    y="percentage",
                     color="#1f77b4",
                     title="",  # No title on graph, tab title is enough
-                    labels={col: col_title, "count": "Count"},
+                    labels={col: col_title, "percentage": "Percentage of episodes (%)"},
                 ),
                 "title": col_title,
             }

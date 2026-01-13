@@ -168,8 +168,20 @@ export default function Home() {
       }
 
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Failed to load dataset')
+        let errorMessage = 'Failed to load dataset'
+        try {
+          const contentType = response.headers.get('content-type')
+          if (contentType && contentType.includes('application/json')) {
+            const error = await response.json()
+            errorMessage = error.detail || error.message || errorMessage
+          } else {
+            const text = await response.text()
+            errorMessage = text || errorMessage
+          }
+        } catch (e) {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`
+        }
+        throw new Error(errorMessage)
       }
 
       setUploadSuccess(true)
