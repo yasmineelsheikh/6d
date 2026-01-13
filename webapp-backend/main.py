@@ -472,25 +472,78 @@ async def upload_dataset(
 ):
     """Upload a dataset folder from local files."""
     try:
+        print(f"Received upload request for dataset: {dataset_name}")
+        print(f"Number of files received: {len(files) if files else 0}")
+        
+        if not files or len(files) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No files were uploaded. Please select a folder to upload."
+            )
+        
         # Create temporary directory for uploaded dataset
         upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
         upload_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Upload directory: {upload_dir}")
+        
+        # Detect root folder name from first file's path
+        # webkitRelativePath includes the root folder name (e.g., "my_dataset/data/file.parquet")
+        # We need to strip it so files are saved directly under upload_dir
+        root_folder_prefix = None
+        first_file_path = None
+        for file in files:
+            if file.filename:
+                first_file_path = file.filename.replace("\\", "/")
+                # Extract root folder name (first part before first slash)
+                if "/" in first_file_path:
+                    root_folder_prefix = first_file_path.split("/")[0]
+                    print(f"Detected root folder prefix: {root_folder_prefix}")
+                break
         
         # Save all uploaded files preserving directory structure
-        for file in files:
-            # Get the relative path from the file's path (if available)
-            file_path = file.filename
-            if not file_path:
-                continue
-            
-            # Create full path
-            full_path = upload_dir / file_path
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Write file
-            with open(full_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
+        files_saved = 0
+        for idx, file in enumerate(files):
+            try:
+                # Get the relative path from the file's path (if available)
+                file_path = file.filename
+                if not file_path:
+                    print(f"File {idx} has no filename, skipping")
+                    continue
+                
+                print(f"Processing file {idx + 1}/{len(files)}: {file_path}")
+                
+                # Normalize the path (handle both forward and backward slashes)
+                file_path = file_path.replace("\\", "/")
+                
+                # Strip root folder prefix if it exists
+                if root_folder_prefix and file_path.startswith(root_folder_prefix + "/"):
+                    file_path = file_path[len(root_folder_prefix) + 1:]
+                    print(f"Stripped root folder prefix, new path: {file_path}")
+                
+                # Create full path
+                full_path = upload_dir / file_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Write file
+                with open(full_path, "wb") as f:
+                    content = await file.read()
+                    f.write(content)
+                files_saved += 1
+                print(f"Saved file: {full_path}")
+            except Exception as file_error:
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"Error saving file {file.filename if file.filename else 'unknown'}: {error_trace}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error saving file {file.filename if file.filename else 'unknown'}: {str(file_error)}"
+                )
+        
+        if files_saved == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No files were uploaded or saved."
+            )
         
         # Validate dataset structure
         if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists():
@@ -515,8 +568,16 @@ async def upload_dataset(
             "dataset_path": str(upload_dir),
             "episodes_ingested": count
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error uploading dataset: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error uploading dataset: {error_trace}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error uploading dataset: {str(e)}"
+        )
 
 @app.post("/api/datasets/load")
 async def load_dataset(request: DatasetLoadRequest):
