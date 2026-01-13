@@ -15,22 +15,7 @@ from __future__ import annotations
 
 from typing import List, Tuple, Optional
 from pathlib import Path
-
-from transformers import AutoProcessor, AutoModelForVision2Seq
-from qwen_vl_utils import process_vision_info
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
-import os 
-import dashscope
-dashscope.base_http_api_url = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
-os.environ['DASHSCOPE_API_KEY'] = 'sk-***' # Your DashScope API Key
-os.environ['OPENAI_BASE_HTTP_API_URL'] = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
-DASH_MODEL_ID = '***' # Your model-ID for API
-model_path = "***" #  The following output example is from a tiny test model
-processor = AutoProcessor.from_pretrained(model_path)
-
-model, output_loading_info = AutoModelForVision2Seq.from_pretrained(model_path, torch_dtype="auto", device_map="auto", output_loading_info=True)
-print("output_loading_info", output_loading_info)
+import asyncio
 
 try:
     # litellm is already used elsewhere in the Ares codebase
@@ -264,9 +249,137 @@ def generate_structured_prompt_from_video(
 
     return (content or "").strip()
 
+async def generate_video_descriptions_with_vlm(
+    video_dir: Path,
+    vlm,
+    task_description: Optional[str] = None,
+    max_frames: int = 8
+) -> List[str]:
+    """
+    Generate video descriptions using the ARES VLM system (same as used in ingestion).
+    
+    Parameters
+    ----------
+    video_dir:
+        Path to the directory containing video files.
+    vlm:
+        VLM instance from ares.models (same as used in ingestion).
+    task_description:
+        Optional high-level task description that applies to all videos.
+    max_frames:
+        Maximum number of frames to extract for non-Gemini VLMs.
+    
+    Returns
+    -------
+    List[str]
+        A list of generated descriptions, one per video file found in the directory.
+        Descriptions are returned in alphabetical order by filename.
+    """
+    from ares.models.base import GeminiVideoVLM
+    from ares.utils.image_utils import split_video_to_frames, choose_and_preprocess_frames
+    from ares.models.base import parse_response
+    
+    # Supported video file extensions
+    video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+    
+    # Find all video files in the directory (non-recursive)
+    video_files = sorted([
+        f for f in video_dir.iterdir() 
+        if f.is_file() and f.suffix.lower() in video_extensions
+    ])
+    
+    if not video_files:
+        print(f"Warning: No video files found in directory: {video_dir}")
+        return []
+    
+    # Generate description for each video
+    descriptions: List[str] = []
+    total_videos = len(video_files)
+    
+    for idx, video_path in enumerate(video_files, 1):
+        try:
+            print(f"Processing video {idx}/{total_videos}: {video_path.name}")
+            
+            # Create prompt info for video description
+            prompt_info = {
+                "task_description": task_description if task_description else None
+            }
+            
+            # Use VLM to generate description
+            # For GeminiVideoVLM, we can use video_path directly
+            # For other VLMs, we'll need to extract frames
+            if isinstance(vlm, GeminiVideoVLM):
+                # Use video directly with GeminiVideoVLM
+                # Note: GeminiVideoVLM only has ask(), not ask_async()
+                messages, response = await asyncio.to_thread(
+                    vlm.ask,
+                    info=prompt_info,
+                    prompt_filename="video_description.jinja2",
+                    video_path=str(video_path.absolute())
+                )
+                # GeminiVideoVLM returns a GenerativeModel response (different format)
+                # Extract text from candidates
+                if hasattr(response, 'candidates') and response.candidates:
+                    description = response.candidates[0].content.parts[0].text
+                elif hasattr(response, 'text'):
+                    description = response.text
+                else:
+                    description = str(response)
+            else:
+                # Extract frames and use as images for other VLMs
+                all_frames = split_video_to_frames(str(video_path.absolute()))
+                # Sample frames evenly
+                frames = choose_and_preprocess_frames(
+                    all_frames, 
+                    n_frames=min(max_frames, len(all_frames))
+                )
+                # Convert numpy arrays to PIL Images if needed
+                from PIL import Image
+                import numpy as np
+                frame_images = []
+                for frame in frames:
+                    if isinstance(frame, np.ndarray):
+                        # Convert BGR to RGB if needed (cv2 uses BGR)
+                        if len(frame.shape) == 3 and frame.shape[2] == 3:
+                            frame = frame[:, :, ::-1]  # BGR to RGB
+                        frame_images.append(Image.fromarray(frame))
+                    elif isinstance(frame, str):
+                        frame_images.append(Image.open(frame))
+                    else:
+                        frame_images.append(frame)
+                
+                messages, response = await vlm.ask_async(
+                    info=prompt_info,
+                    prompt_filename="video_description.jinja2",
+                    images=frame_images
+                )
+                # For standard VLM responses, parse from choices
+                if hasattr(response, 'choices') and response.choices:
+                    description = parse_response(response.choices[0])
+                else:
+                    description = str(response)
+            
+            descriptions.append(description.strip())
+            print(f"Successfully generated description for {video_path.name}")
+            
+        except Exception as e:
+            print(f"Error processing video {video_path.name}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Add empty string to maintain list length/indexing
+            descriptions.append("")
+    
+    return descriptions
+
+
+# DEPRECATED: This function uses the local Qwen VLM. 
+# Use generate_video_descriptions_with_vlm() instead, which uses the same VLM as ingestion.
 def generate_video_description(directory_path: str, task_description: Optional[str] = None) -> List[str]:
     """
-    Use the local Qwen VLM to generate rich, structured descriptions for all videos in a directory.
+    [DEPRECATED] Use the local Qwen VLM to generate rich, structured descriptions for all videos in a directory.
+    
+    This function is deprecated. Use generate_video_descriptions_with_vlm() instead, which uses
+    the same ARES VLM system as the ingestion process.
 
     Iterates through each video file in the specified directory and generates a description
     for each one using the Qwen VLM model.
@@ -288,6 +401,12 @@ def generate_video_description(directory_path: str, task_description: Optional[s
     -----
     Supported video file extensions: .mp4, .avi, .mov, .mkv, .webm, .flv, .m4v
     """
+    # NOTE: This function requires Qwen VLM imports which have been removed.
+    # It is kept for reference but will not work without restoring the Qwen imports.
+    raise NotImplementedError(
+        "This function is deprecated. Use generate_video_descriptions_with_vlm() instead, "
+        "which uses the same VLM system as ingestion."
+    )
     # Configure sampling: e.g., 0.25 FPS = 1 frame per 4 seconds
     sample_fps = 0.25
 
@@ -374,9 +493,14 @@ If a high-level task is provided, integrate it seamlessly into the action portio
     
     return descriptions
 
+# DEPRECATED: This function uses the local Qwen VLM.
+# It is kept for reference but requires Qwen VLM imports which have been removed.
 def inference(video, prompt, max_new_tokens=2048, total_pixels=20480 * 32 * 32, min_pixels=64 * 32 * 32, max_frames= 2048, sample_fps = 2):
     """
-    Perform multimodal inference on input video and text prompt to generate model response.
+    [DEPRECATED] Perform multimodal inference on input video and text prompt to generate model response.
+    
+    This function is deprecated and requires Qwen VLM imports which have been removed.
+    Use generate_video_descriptions_with_vlm() instead.
 
     Args:
         video (str or list/tuple): Video input, supports two formats:
@@ -398,31 +522,7 @@ def inference(video, prompt, max_new_tokens=2048, total_pixels=20480 * 32 * 32, 
         - When `video` is a string (path/URL), `sample_fps` is ignored and will be overridden by the video reader backend.
         - When `video` is a frame list, `sample_fps` informs the model of the original sampling rate to help understand temporal density.
     """
-
-    messages = [
-        {"role": "user", "content": [
-                {"video": video,
-                "total_pixels": total_pixels, 
-                "min_pixels": min_pixels, 
-                "max_frames": max_frames,
-                'sample_fps':sample_fps},
-                {"type": "text", "text": prompt},
-            ]
-        },
-    ]
-    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, video_inputs, video_kwargs = process_vision_info([messages], return_video_kwargs=True, 
-                                                                   image_patch_size= 16,
-                                                                   return_video_metadata=True)
-    if video_inputs is not None:
-        video_inputs, video_metadatas = zip(*video_inputs)
-        video_inputs, video_metadatas = list(video_inputs), list(video_metadatas)
-    else:
-        video_metadatas = None
-    inputs = processor(text=[text], images=image_inputs, videos=video_inputs, video_metadata=video_metadatas, **video_kwargs, do_resize=False, return_tensors="pt")
-    inputs = inputs.to('cuda')
-
-    output_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
-    generated_ids = [output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids, output_ids)]
-    output_text = processor.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-    return output_text[0]
+    raise NotImplementedError(
+        "This function is deprecated. Use generate_video_descriptions_with_vlm() instead, "
+        "which uses the same VLM system as ingestion."
+    )

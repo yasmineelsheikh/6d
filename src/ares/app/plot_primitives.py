@@ -86,7 +86,7 @@ def create_histogram(
     )
     fig.update_layout(
         xaxis_title=labels.get(x, x),
-        yaxis_title="count",
+        yaxis_title=labels.get("count", "Percentage of episodes (%)"),
         showlegend=False,
         bargap=0.1,
         plot_bgcolor="rgba(0,0,0,0)",
