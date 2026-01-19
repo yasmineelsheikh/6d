@@ -1,0 +1,7 @@
+{
+    "guidance": 3,
+    "edge": {
+        "control_path": "../edge/robot_edge.mp4",
+        "control_weight": 1
+    }
+}

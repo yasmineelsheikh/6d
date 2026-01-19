@@ -1,4 +1,3 @@
-import copy
 import json
 import re
 import string
@@ -294,44 +293,10 @@ class VLMInformationExtractor(InformationExtractor):
             valid_responses = [response for _, response in results]
             print(f"[DEBUG] Received {len(valid_responses)} responses from VLM for {len(valid_indices)} valid episodes")
             
-            # Find first successful response and duplicate it for ALL episodes
-            # (since all episodes have the same settings, they should have the same response)
-            successful_response = None
-            successful_idx = None
-            for idx, response in enumerate(valid_responses):
-                try:
-                    # Try to parse the response to see if it's valid
-                    if hasattr(response, 'choices') and response.choices and len(response.choices) > 0:
-                        choice = response.choices[0]
-                        if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
-                            content = choice.message.content
-                            if content and len(str(content).strip()) > 0:
-                                # Try to parse as JSON to validate it's a valid response
-                                try:
-                                    structured_info = parse_response(choice, load_json=True)
-                                    # If we get here, the response is valid
-                                    successful_response = response
-                                    successful_idx = idx
-                                    print(f"[DEBUG] Found successful response at index {idx}, will duplicate for all {num_episodes} episodes")
-                                    break
-                                except (ValueError, json.JSONDecodeError) as e:
-                                    print(f"[DEBUG] Response {idx} failed to parse: {e}")
-                                    continue
-                except Exception as e:
-                    print(f"[DEBUG] Response {idx} validation failed: {e}")
-                    continue
-            
-            # If we found a successful response, duplicate it for ALL episodes (original count)
-            if successful_response is not None:
-                duplicated_response = copy.deepcopy(successful_response)
-                # Fill entire responses list with duplicated response (for all episodes, valid and invalid)
-                responses = [copy.deepcopy(duplicated_response) for _ in range(num_episodes)]
-                print(f"[DEBUG] Duplicated successful response {successful_idx} for all {num_episodes} episodes (original count)")
-            else:
-                print(f"[WARNING] No successful response found, will process all responses individually")
-                # Fill responses list at valid_indices positions with original responses
-                for idx, valid_idx in enumerate(valid_indices):
-                    responses[valid_idx] = valid_responses[idx]
+            # Map each valid response to its corresponding episode index
+            # Each episode gets its own unique response from the VLM
+            for idx, valid_idx in enumerate(valid_indices):
+                responses[valid_idx] = valid_responses[idx]
             
             # Debug: Check responses (sample first few to avoid spam)
             num_to_check = min(5, num_episodes)

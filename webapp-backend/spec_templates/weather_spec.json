@@ -1,0 +1,11 @@
+{
+    "guidance": 3,
+    "depth": {
+        "control_path": "../depth/robot_depth.mp4",
+        "control_weight": 0.9
+    },
+    "seg": {
+        "control_path": "../seg/robot_seg.mp4",
+        "control_weight": 0.9
+    }
+}

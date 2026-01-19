@@ -27,14 +27,6 @@ interface DatasetInfo {
   robot_type: string
 }
 
-interface AresState {
-  total_rows: number
-  total_statistics: any
-  annotation_statistics: any
-  has_embeddings: boolean
-  has_annotations: boolean
-}
-
 interface Visualization {
   title: string
   figure: any
@@ -47,12 +39,6 @@ export default function Home() {
   const [curatedData, setCuratedData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  
-  // ARES state
-  const [aresInitialized, setAresInitialized] = useState(false)
-  const [aresLoading, setAresLoading] = useState(false)
-  const [aresError, setAresError] = useState<string | null>(null)
-  const [aresState, setAresState] = useState<AresState | null>(null)
   
   // Distributions state
   const [aresDistributions, setAresDistributions] = useState<Visualization[]>([])
@@ -185,8 +171,17 @@ export default function Home() {
       }
 
       setUploadSuccess(true)
-      // Navigate to dataset page
-      router.push(`/dataset/${encodeURIComponent(finalDatasetName)}`)
+      // Navigate to dataset page with environment and axes as query parameters
+      const params = new URLSearchParams()
+      if (environment) {
+        params.append('environment', environment)
+      }
+      if (selectedAxes.length > 0) {
+        params.append('axes', JSON.stringify(selectedAxes))
+      }
+      const queryString = params.toString()
+      const url = `/dataset/${encodeURIComponent(finalDatasetName)}${queryString ? '?' + queryString : ''}`
+      router.push(url)
     } catch (error: any) {
       setError(error.message)
       setUploadLoading(false)
@@ -241,76 +236,111 @@ export default function Home() {
     }
   }
 
-  // Initialize ARES data
-  useEffect(() => {
-    const init = async () => {
-      setAresLoading(true)
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 60000)
-        
-        const response = await fetch('/api/ares/initialize', {
-          method: 'POST',
-          signal: controller.signal,
-        })
-        clearTimeout(timeoutId)
-        
-        if (!response.ok) {
-          let errorMessage = `Failed to initialize ARES: ${response.status} ${response.statusText}`
-          try {
-            const text = await response.text()
-            try {
-              const errorData = JSON.parse(text)
-              errorMessage = errorData.detail || errorData.message || text || errorMessage
-            } catch {
-              errorMessage = text || errorMessage
-            }
-          } catch (e) {
-            // Keep default error message
-          }
-          throw new Error(errorMessage)
-        }
-        
-        const initData = await response.json()
-        const stateResponse = await fetch('/api/ares/state')
-        if (!stateResponse.ok) {
-          throw new Error('Failed to get state')
-        }
-        const stateData = await stateResponse.json()
-        setAresState(stateData)
-        setAresInitialized(true)
-      } catch (err: any) {
-        let errorMsg = err.message || err.toString() || 'Unknown error occurred'
-        if (err.name === 'AbortError') {
-          errorMsg = 'Initialization timed out after 60 seconds.'
-        }
-        setAresError(errorMsg)
-      } finally {
-        setAresLoading(false)
-      }
-    }
-    init()
-  }, [])
 
-  // Load distributions
+  // Load distributions - only when a dataset is loaded
   useEffect(() => {
-    if (!aresInitialized) return
+    // Don't load distributions if no dataset is loaded (e.g., after "New Task")
+    if (!currentDataset) {
+      setAresDistributions([])
+      return
+    }
+
+    let pollInterval: NodeJS.Timeout | null = null
+    let retryCount = 0
+    const maxRetries = 60 // Poll for up to 60 seconds (1 second intervals)
+    const pollIntervalMs = 1000 // Poll every 1 second
+    let isMounted = true
 
     const loadDistributions = async () => {
+      if (!isMounted) return
+      
       try {
-        const distResponse = await fetch('/api/ares/distributions')
+        // Build query parameters
+        const params = new URLSearchParams()
+        if (currentDataset) {
+          params.append('dataset_name', currentDataset)
+        }
+        if (environment) {
+          params.append('environment', environment)
+        }
+        // Always send axes parameter, even if empty, so backend knows user's selection
+        params.append('axes', JSON.stringify(selectedAxes))
+        
+        const url = `/api/ares/distributions${params.toString() ? '?' + params.toString() : ''}`
+        const distResponse = await fetch(url)
         if (distResponse.ok) {
           const distData = await distResponse.json()
+          
+          // If ingestion is in progress, poll until it completes
+          if (distData.ingestion_status === 'in_progress') {
+            console.log('Ingestion in progress, polling for completion...')
+            if (!pollInterval && retryCount < maxRetries) {
+              // Start polling
+              pollInterval = setInterval(() => {
+                if (!isMounted) {
+                  if (pollInterval) clearInterval(pollInterval)
+                  return
+                }
+                retryCount++
+                if (retryCount >= maxRetries) {
+                  if (pollInterval) clearInterval(pollInterval)
+                  pollInterval = null
+                  console.log('Max retries reached, stopping poll')
+                  return
+                }
+                loadDistributions()
+              }, pollIntervalMs)
+            }
+            return
+          }
+          
+          // Clear polling if ingestion completed
+          if (pollInterval) {
+            clearInterval(pollInterval)
+            pollInterval = null
+          }
+          
+          // Set distributions
           const vizs = distData.visualizations || []
-          setAresDistributions(vizs)
+          if (isMounted) {
+            setAresDistributions(vizs)
+            if (retryCount > 0) {
+              console.log('Distributions loaded after ingestion completed')
+            }
+          }
+        } else {
+          // If request failed and we haven't retried too many times, retry
+          if (retryCount < maxRetries) {
+            retryCount++
+            setTimeout(() => {
+              if (isMounted) loadDistributions()
+            }, pollIntervalMs)
+          } else {
+            console.error('Failed to load distributions:', distResponse.status, distResponse.statusText)
+          }
         }
       } catch (err: any) {
         console.error('Error loading distributions:', err)
+        // Retry on error if we haven't exceeded max retries
+        if (retryCount < maxRetries) {
+          retryCount++
+          setTimeout(() => {
+            if (isMounted) loadDistributions()
+          }, pollIntervalMs)
+        }
       }
     }
 
     loadDistributions()
-  }, [aresInitialized])
+    
+    // Cleanup polling on unmount or dependency change
+    return () => {
+      isMounted = false
+      if (pollInterval) {
+        clearInterval(pollInterval)
+      }
+    }
+  }, [currentDataset, environment, selectedAxes])
 
   // Load tasks from localStorage
   useEffect(() => {
@@ -432,7 +462,24 @@ export default function Home() {
       <SideMenu
         isOpen={isSideMenuOpen}
         onToggle={() => setIsSideMenuOpen(!isSideMenuOpen)}
-        onAddTask={() => window.location.reload()}
+        onAddTask={async () => {
+          try {
+            // Clear the database and initialize components when starting a new task
+            const response = await fetch('/api/database/clear', {
+              method: 'POST',
+            })
+            if (!response.ok) {
+              console.error('Failed to clear database')
+            } else {
+              const data = await response.json()
+              console.log('Database cleared:', data.message)
+            }
+          } catch (error) {
+            console.error('Error clearing database:', error)
+          }
+          // Reload the page
+          window.location.reload()
+        }}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
         onLogout={() => {
           logout()
@@ -714,7 +761,6 @@ export default function Home() {
               <DatasetDistributions 
                 datasetName={currentDataset} 
                 aresDistributions={aresDistributions}
-                aresInitialized={aresInitialized}
               />
               <EpisodePreview datasetData={datasetData} />
             </div>

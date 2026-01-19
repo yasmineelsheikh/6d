@@ -34,76 +34,56 @@ def load_metadata(dataset_path: Path) -> tuple[dict, pd.DataFrame]:
     return info, tasks_df
 
 
-def split_videos_for_parquet(parquet_path: Path, dataset_path: Path, dataset_name: str):
-    """Split the corresponding video file into episode clips."""
+def copy_episode_videos(dataset_path: Path, dataset_name: str):
+    """Copy episode video clips from dataset's videos directory to ARES_VIDEO_DIR.
+    
+    Assumes episode clips are already present in {dataset_path}/videos/ as episode_{idx}.mp4
+    and copies them to ARES_VIDEO_DIR/{dataset_name}/episode_{idx}.mp4
+    """
     try:
-        from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
         from ares.constants import ARES_VIDEO_DIR
+        import shutil
     except ImportError:
-        print("moviepy not installed. Skipping video splitting.")
+        print("Required imports not available. Skipping video copying.")
         return
-
-    # Determine corresponding video file
-    # Structure: videos/observation.images.cam_right/chunk-XXX/file-YYY.mp4
-    # Parquet: data/chunk-XXX/file-YYY.parquet
     
-    chunk_name = parquet_path.parent.name
-    file_name = parquet_path.stem # file-000
-    
-    # We assume cam_right is the main video source as per user request
-    video_source = "observation.images.cam_right"
-    video_file = dataset_path / "videos" / video_source / chunk_name / f"{file_name}.mp4"
-    
-    if not video_file.exists():
-        print(f"Video file not found: {video_file}")
+    videos_source_dir = dataset_path / "videos"
+    if not videos_source_dir.exists():
+        print(f"Videos directory not found: {videos_source_dir}")
         return
-        
-    # Read parquet to get frame ranges
-    df = pd.read_parquet(parquet_path)
-    fps = 30.0 # Default, should read from info.json but passing info is complex here. 
-               # We can load info again or pass it. For now hardcode or read info.
     
     # Create output directory
     output_dir = Path(ARES_VIDEO_DIR) / dataset_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"Splitting video {video_file} into episodes...")
+    print(f"Copying episode videos from {videos_source_dir} to {output_dir}...")
     
-    for episode_idx, episode_df in df.groupby("episode_index"):
-        # Check if already exists
-        output_path = output_dir / f"episode_{episode_idx}.mp4"
+    # Find all episode video files (episode_*.mp4)
+    episode_videos = sorted(videos_source_dir.glob("episode_*.mp4"))
+    
+    if not episode_videos:
+        print(f"No episode videos found in {videos_source_dir}")
+        return
+    
+    copied_count = 0
+    for video_file in episode_videos:
+        # Extract episode index from filename (e.g., episode_0.mp4 -> 0)
+        episode_name = video_file.stem  # episode_0
+        output_path = output_dir / video_file.name  # episode_0.mp4
+        
+        # Skip if already exists
         if output_path.exists():
             continue
-            
-        # Get frame range
-        min_frame = episode_df["frame_index"].min()
-        max_frame = episode_df["frame_index"].max()
-        
-        # Convert to seconds
-        start_time = min_frame / fps
-        end_time = (max_frame + 1) / fps
         
         try:
-            ffmpeg_extract_subclip(str(video_file), start_time, end_time, targetname=str(output_path))
-            
-            # Extract first frame for lazy loading preview
-            import cv2
-            
-            # Create frames directory: data/videos/{dataset_name}/episode_{idx}
-            frames_dir = output_dir / f"episode_{episode_idx}"
-            frames_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Read the first frame from the newly created video
-            cap = cv2.VideoCapture(str(output_path))
-            ret, frame = cap.read()
-            if ret:
-                # Save as frame_0000.jpg
-                frame_path = frames_dir / "frame_0000.jpg"
-                cv2.imwrite(str(frame_path), frame)
-            cap.release()
-            
+            # Copy video file
+            shutil.copy2(video_file, output_path)
+            copied_count += 1
+            print(f"Copied {video_file.name} to {output_path}")
         except Exception as e:
-            print(f"Error splitting/processing episode {episode_idx}: {e}")
+            print(f"Error copying {video_file.name}: {e}")
+    
+    print(f"Copied {copied_count} episode videos to {output_dir}")
 
 
 def process_chunk(
@@ -147,7 +127,10 @@ def ingest_dataset(data_dir: str, engine_url: str, dataset_name: str) -> int:
     """Ingest LeRobot dataset into ARES.
     
     NOTE: Step 3c (database record creation) is skipped.
-    Only processes videos and counts episodes. No database records are created.
+    Copies episode videos from dataset's videos directory and counts episodes.
+    No database records are created.
+    
+    Assumes episode clips are already present in {data_dir}/videos/ as episode_{idx}.mp4
     
     Returns:
         int: Number of episodes processed (not ingested into database)
@@ -166,19 +149,17 @@ def ingest_dataset(data_dir: str, engine_url: str, dataset_name: str) -> int:
     data_path = dataset_path / "data"
     total_episodes = 0
     
+    # Copy episode videos from dataset's videos directory to ARES_VIDEO_DIR
+    copy_episode_videos(dataset_path, dataset_name)
+    
     # Iterate over chunks
     for chunk_path in data_path.glob("chunk-*"):
         if chunk_path.is_dir():
             print(f"Processing chunk: {chunk_path.name}")
-            
-            # Split videos for this chunk
-            for parquet_file in chunk_path.glob("*.parquet"):
-                split_videos_for_parquet(parquet_file, dataset_path, dataset_name)
-                
             count = process_chunk(chunk_path, dataset_path, info, tasks_df, engine, dataset_name)
             total_episodes += count
     
-    print(f"Ingestion complete. Total episodes processed: {total_episodes} (videos split, database records skipped)")
+    print(f"Ingestion complete. Total episodes processed: {total_episodes} (videos copied, database records skipped)")
     return total_episodes
 
 

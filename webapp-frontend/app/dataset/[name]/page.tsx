@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { Loader2, XCircle, Menu, ChevronDown, ChevronRight } from 'lucide-react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { Loader2, XCircle, Menu } from 'lucide-react'
 import DatasetOverview from '@/components/DatasetOverview'
 import DatasetDistributions from '@/components/DatasetDistributions'
 import EpisodePreview from '@/components/EpisodePreview'
@@ -23,14 +23,6 @@ interface DatasetInfo {
   robot_type: string
 }
 
-interface AresState {
-  total_rows: number
-  total_statistics: any
-  annotation_statistics: any
-  has_embeddings: boolean
-  has_annotations: boolean
-}
-
 interface Visualization {
   title: string
   figure: any
@@ -39,6 +31,7 @@ interface Visualization {
 export default function DatasetPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const datasetName = params?.name as string
 
   const [datasetInfo, setDatasetInfo] = useState<DatasetInfo | null>(null)
@@ -46,14 +39,12 @@ export default function DatasetPage() {
   const [curatedData, setCuratedData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [distributionsLoading, setDistributionsLoading] = useState(false)
+  const [ingestionComplete, setIngestionComplete] = useState(false)
+  const [waitingForIngestion, setWaitingForIngestion] = useState(true)
+  const [ingestionProgress, setIngestionProgress] = useState(0)
   const [analysisView, setAnalysisView] = useState<'original' | 'new'>('original')
   const [analysisSwitchEnabled, setAnalysisSwitchEnabled] = useState(false)
-  
-  // ARES state
-  const [aresInitialized, setAresInitialized] = useState(false)
-  const [aresLoading, setAresLoading] = useState(false)
-  const [aresError, setAresError] = useState<string | null>(null)
-  const [aresState, setAresState] = useState<AresState | null>(null)
   
   // Distributions state
   const [aresDistributions, setAresDistributions] = useState<Visualization[]>([])
@@ -66,7 +57,6 @@ export default function DatasetPage() {
   // Plot configuration state
   const [environment, setEnvironment] = useState<'Indoor' | 'Outdoor' | ''>('')
   const [selectedAxes, setSelectedAxes] = useState<string[]>([])
-  const [showAdvancedAxes, setShowAdvancedAxes] = useState(false)
   const [isIndoor, setIsIndoor] = useState(false)
   const [isOutdoor, setIsOutdoor] = useState(false)
   
@@ -162,101 +152,315 @@ export default function DatasetPage() {
     }
   }
 
-  // Initialize ARES data
+  // Load distributions - only after ingestion is complete
   useEffect(() => {
-    const init = async () => {
-      setAresLoading(true)
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 60000)
-        
-        const response = await fetch('/api/ares/initialize', {
-          method: 'POST',
-          signal: controller.signal,
-        })
-        clearTimeout(timeoutId)
-        
-        if (!response.ok) {
-          let errorMessage = `Failed to initialize ARES: ${response.status} ${response.statusText}`
-          try {
-            const text = await response.text()
-            try {
-              const errorData = JSON.parse(text)
-              errorMessage = errorData.detail || errorData.message || text || errorMessage
-            } catch {
-              errorMessage = text || errorMessage
-            }
-          } catch (e) {
-            // Keep default error message
-          }
-          throw new Error(errorMessage)
-        }
-        
-        const initData = await response.json()
-        const stateResponse = await fetch('/api/ares/state')
-        if (!stateResponse.ok) {
-          throw new Error('Failed to get state')
-        }
-        const stateData = await stateResponse.json()
-        setAresState(stateData)
-        setAresInitialized(true)
-      } catch (err: any) {
-        let errorMsg = err.message || err.toString() || 'Unknown error occurred'
-        if (err.name === 'AbortError') {
-          errorMsg = 'Initialization timed out after 60 seconds.'
-        }
-        setAresError(errorMsg)
-      } finally {
-        setAresLoading(false)
-      }
+    // Don't load distributions if ingestion is not complete or dataset is not loaded
+    if (!ingestionComplete || !datasetName) {
+      // Only clear distributions if we don't have valid data yet
+      // Don't clear if we already have distributions loaded
+      return
     }
-    init()
-  }, [])
 
-  // Load distributions
-  useEffect(() => {
-    if (!aresInitialized) return
+    // Don't make API call if no axes are selected AND no environment is set
+    // If environment is set but selectedAxes is empty, it means selectedAxes is being updated
+    // in another useEffect, so we'll wait for that update to trigger this effect again
+    // Only skip if both are empty (user hasn't selected anything yet)
+    if (selectedAxes.length === 0 && !environment) {
+      console.log('[FRONTEND] Skipping distributions call - no axes and no environment selected. Existing vizs:', aresDistributions.length)
+      // Don't clear existing distributions - just skip the call
+      return
+    }
+    
+    // If environment is set but axes are empty, this is likely a race condition where
+    // environment changed but selectedAxes hasn't been updated yet. Skip this call
+    // and wait for selectedAxes to update (which will trigger this effect again)
+    if (selectedAxes.length === 0 && environment) {
+      console.log('[FRONTEND] Waiting for selectedAxes to update - Environment:', environment, 'Existing vizs:', aresDistributions.length)
+      return
+    }
+    
+    console.log('[FRONTEND] Making distributions call - Environment:', environment, 'Axes:', selectedAxes, 'Existing vizs:', aresDistributions.length)
 
     const loadDistributions = async () => {
       try {
-        const distResponse = await fetch('/api/ares/distributions')
+        setDistributionsLoading(true)
+        
+        // Build query parameters
+        const params = new URLSearchParams()
+        if (datasetName) {
+          params.append('dataset_name', datasetName)
+        }
+        if (environment) {
+          params.append('environment', environment)
+        }
+        // Always send axes parameter, even if empty, so backend knows user's selection
+        params.append('axes', JSON.stringify(selectedAxes))
+        
+        const url = `/api/ares/distributions${params.toString() ? '?' + params.toString() : ''}`
+        const distResponse = await fetch(url)
         if (distResponse.ok) {
           const distData = await distResponse.json()
           const vizs = distData.visualizations || []
-          setAresDistributions(vizs)
+          console.log('[FRONTEND] Received distributions:', vizs.length, 'visualizations')
+          console.log('[FRONTEND] Distribution titles:', vizs.map((v: any) => v.title))
+          console.log('[FRONTEND] Current state before update:', aresDistributions.length, 'existing visualizations')
+          // Only update state if we got visualizations, or if we explicitly want to clear
+          // This prevents empty responses from overwriting good visualizations
+          if (vizs.length > 0) {
+            setAresDistributions(vizs)
+          } else {
+            console.log('[FRONTEND] Skipping state update - received 0 visualizations, keeping existing:', aresDistributions.length)
+            // Don't overwrite existing distributions with empty array
+          }
+        } else {
+          console.error('Failed to load distributions:', distResponse.status, distResponse.statusText)
         }
       } catch (err: any) {
         console.error('Error loading distributions:', err)
+      } finally {
+        setDistributionsLoading(false)
       }
     }
+    
     loadDistributions()
-  }, [aresInitialized])
+  }, [ingestionComplete, datasetName, environment, selectedAxes])
 
-  // Load dataset when component mounts or dataset name changes
+  // Check ingestion status and wait for completion before showing page
   useEffect(() => {
-    if (datasetName) {
-      handleDatasetLoaded(datasetName)
+    if (!datasetName) {
+      setWaitingForIngestion(false)
+      setIngestionComplete(true)
+      return
+    }
+
+    let pollInterval: NodeJS.Timeout | null = null
+    let progressInterval: NodeJS.Timeout | null = null
+    let retryCount = 0
+    const maxRetries = 300 // Poll for up to 5 minutes (1 second intervals)
+    const pollIntervalMs = 1000 // Poll every 1 second
+    let isMounted = true
+    const startTime = Date.now()
+    const estimatedMaxTime = 300000 // 5 minutes in milliseconds
+
+    // Update progress gradually while waiting
+    const updateProgress = () => {
+      if (!isMounted) return
+      
+      const elapsed = Date.now() - startTime
+      // Gradually increase progress, but cap at 90% until ingestion completes
+      const timeBasedProgress = Math.min(90, (elapsed / estimatedMaxTime) * 90)
+      setIngestionProgress(timeBasedProgress)
+    }
+
+    const checkIngestionStatus = async () => {
+      if (!isMounted) return
+
+      try {
+        // Check ingestion status via distributions endpoint
+        const params = new URLSearchParams()
+        params.append('dataset_name', datasetName)
+        // Use default Indoor environment to check status
+        params.append('environment', 'Indoor')
+        params.append('axes', JSON.stringify(['Objects', 'Lighting', 'Color/Material']))
+        
+        const url = `/api/ares/distributions?${params.toString()}`
+        const distResponse = await fetch(url)
+        
+        if (distResponse.ok) {
+          const distData = await distResponse.json()
+          
+          // If ingestion is in progress, keep polling
+          if (distData.ingestion_status === 'in_progress') {
+            console.log('Ingestion in progress, waiting for completion...')
+            if (!pollInterval && retryCount < maxRetries) {
+              // Start progress updates
+              if (!progressInterval) {
+                progressInterval = setInterval(updateProgress, 100) // Update every 100ms
+              }
+              
+              // Start polling
+              pollInterval = setInterval(() => {
+                if (!isMounted) {
+                  if (pollInterval) clearInterval(pollInterval)
+                  if (progressInterval) clearInterval(progressInterval)
+                  return
+                }
+                retryCount++
+                if (retryCount >= maxRetries) {
+                  if (pollInterval) clearInterval(pollInterval)
+                  if (progressInterval) clearInterval(progressInterval)
+                  pollInterval = null
+                  progressInterval = null
+                  if (isMounted) {
+                    setIngestionProgress(100)
+                    setWaitingForIngestion(false)
+                    setIngestionComplete(true) // Show page even if timeout
+                  }
+                  console.log('Max retries reached, showing page anyway')
+                  return
+                }
+                checkIngestionStatus()
+              }, pollIntervalMs)
+            }
+            return
+          }
+          
+          // Ingestion is complete (or not in progress)
+          if (pollInterval) {
+            clearInterval(pollInterval)
+            pollInterval = null
+          }
+          if (progressInterval) {
+            clearInterval(progressInterval)
+            progressInterval = null
+          }
+          
+          if (isMounted) {
+            setIngestionProgress(100)
+            setIngestionComplete(true)
+            setWaitingForIngestion(false)
+            console.log('Ingestion complete, showing page')
+            // Load the dataset info (distributions will load automatically via useEffect)
+            handleDatasetLoaded(datasetName)
+          }
+        } else {
+          // If request failed, assume ingestion might be complete and show page
+          if (retryCount < 10) {
+            retryCount++
+            setTimeout(() => {
+              if (isMounted) checkIngestionStatus()
+            }, pollIntervalMs)
+          } else {
+            // After 10 retries, assume ready and show page
+            if (isMounted) {
+              if (progressInterval) clearInterval(progressInterval)
+              setIngestionProgress(100)
+              setIngestionComplete(true)
+              setWaitingForIngestion(false)
+              handleDatasetLoaded(datasetName)
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error('Error checking ingestion status:', err)
+        // On error, retry a few times then show page
+        if (retryCount < 10) {
+          retryCount++
+          setTimeout(() => {
+            if (isMounted) checkIngestionStatus()
+          }, pollIntervalMs)
+        } else {
+          // After 10 retries, assume ready and show page
+          if (isMounted) {
+            if (progressInterval) clearInterval(progressInterval)
+            setIngestionProgress(100)
+            setIngestionComplete(true)
+            setWaitingForIngestion(false)
+            handleDatasetLoaded(datasetName)
+          }
+        }
+      }
+    }
+
+    // Start checking ingestion status
+    setWaitingForIngestion(true)
+    setIngestionComplete(false)
+    setIngestionProgress(0)
+    checkIngestionStatus()
+
+    // Cleanup on unmount
+    return () => {
+      isMounted = false
+      if (pollInterval) {
+        clearInterval(pollInterval)
+      }
+      if (progressInterval) {
+        clearInterval(progressInterval)
+      }
     }
   }, [datasetName])
 
-  // Initialize all axes as checked by default when environment changes
+  // Track if axes were initialized from URL params to prevent auto-selection from overriding them
+  const [axesInitializedFromUrl, setAxesInitializedFromUrl] = useState(false)
+  
+  // Initialize environment and axes from URL query parameters (set during upload)
   useEffect(() => {
-    if (environment === 'Indoor') {
-      setSelectedAxes(['Objects', 'Lighting', 'Color/Material'])
-    } else if (environment === 'Outdoor') {
-      setSelectedAxes(['Objects', 'Lighting', 'Weather', 'Road Surface'])
-    } else {
-      setSelectedAxes([])
+    const envParam = searchParams?.get('environment')
+    const axesParam = searchParams?.get('axes')
+    
+    if (envParam) {
+      console.log('[FRONTEND] Initializing from URL params - environment:', envParam, 'axes:', axesParam)
+      if (envParam === 'Indoor') {
+        setIsIndoor(true)
+        setIsOutdoor(false)
+      } else if (envParam === 'Outdoor') {
+        setIsIndoor(false)
+        setIsOutdoor(true)
+      }
     }
-  }, [environment])
+    
+    if (axesParam) {
+      try {
+        const parsedAxes = JSON.parse(axesParam)
+        if (Array.isArray(parsedAxes)) {
+          // Set axes from URL params - empty array is valid (user unchecked all)
+          setSelectedAxes(parsedAxes)
+          setAxesInitializedFromUrl(true)
+          console.log('[FRONTEND] Initialized selectedAxes from URL:', parsedAxes)
+        }
+      } catch (e) {
+        console.error('[FRONTEND] Failed to parse axes from URL:', e)
+      }
+    } else if (envParam) {
+      // Environment was set but no axes param - means user didn't explicitly set axes
+      // Don't mark as initialized from URL so auto-selection can run
+      setAxesInitializedFromUrl(false)
+    }
+  }, [searchParams])
+
+  // Default to Indoor environment when ingestion is complete and no environment is set
+  // This matches the backend default and upload page settings
+  // Only default if no environment was passed via URL params
+  useEffect(() => {
+    const envParam = searchParams?.get('environment')
+    if (ingestionComplete && !envParam && !environment && !isIndoor && !isOutdoor) {
+      console.log('[FRONTEND] Defaulting to Indoor environment (no URL params)')
+      setIsIndoor(true)
+    }
+  }, [ingestionComplete, environment, isIndoor, isOutdoor, searchParams])
+
+  // Initialize all axes as checked by default when environment changes
+  // Only reset if environment actually changed AND axes weren't initialized from URL params
+  // This prevents overriding user selections from the upload page
+  const [prevEnvironment, setPrevEnvironment] = useState<string>('')
+  useEffect(() => {
+    // Only auto-select axes if environment actually changed AND axes weren't set from URL params
+    if (environment !== prevEnvironment && !axesInitializedFromUrl) {
+      if (environment === 'Indoor') {
+        setSelectedAxes(['Objects', 'Lighting', 'Color/Material'])
+      } else if (environment === 'Outdoor') {
+        setSelectedAxes(['Objects', 'Lighting', 'Weather', 'Road Surface'])
+      } else {
+        setSelectedAxes([])
+      }
+      setPrevEnvironment(environment)
+    } else if (environment !== prevEnvironment) {
+      // Environment changed but axes were set from URL - just update prevEnvironment
+      setPrevEnvironment(environment)
+    }
+  }, [environment, prevEnvironment, axesInitializedFromUrl])
   
   // Update environment based on checkbox states
   useEffect(() => {
+    console.log('[FRONTEND] Environment useEffect - isIndoor:', isIndoor, 'isOutdoor:', isOutdoor)
     if (isIndoor && !isOutdoor) {
+      console.log('[FRONTEND] Setting environment to Indoor')
       setEnvironment('Indoor')
     } else if (isOutdoor && !isIndoor) {
+      console.log('[FRONTEND] Setting environment to Outdoor')
       setEnvironment('Outdoor')
     } else if (!isIndoor && !isOutdoor) {
+      console.log('[FRONTEND] Clearing environment (no checkboxes selected)')
       setEnvironment('')
     }
   }, [isIndoor, isOutdoor])
@@ -290,6 +494,24 @@ export default function DatasetPage() {
           }}
         />
       </>
+    )
+  }
+
+  // Show loading screen while waiting for ingestion to complete
+  if (waitingForIngestion || !ingestionComplete) {
+    return (
+      <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+        <div className="w-full max-w-md px-8">
+          <div className="h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-[#9aa4b5] rounded-full transition-all duration-500 ease-out"
+              style={{
+                width: `${ingestionProgress}%`
+              }}
+            />
+          </div>
+        </div>
+      </div>
     )
   }
 
@@ -370,11 +592,12 @@ export default function DatasetPage() {
           <div className="mb-8">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-medium text-[#d4d4d4]">Data Analysis</h2>
-              <div
-                className={`inline-flex rounded border border-[#2a2a2a] text-[11px] ${
-                  !analysisSwitchEnabled ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
+              <div className="flex items-center gap-3">
+                <div
+                  className={`inline-flex rounded border border-[#2a2a2a] text-[11px] ${
+                    !analysisSwitchEnabled ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
                 <button
                   type="button"
                   onClick={() => analysisSwitchEnabled && setAnalysisView('original')}
@@ -397,6 +620,7 @@ export default function DatasetPage() {
                 >
                   New
                 </button>
+                </div>
               </div>
             </div>
             <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-8">
@@ -406,7 +630,7 @@ export default function DatasetPage() {
                   <DatasetDistributions 
                     datasetName={datasetName} 
                     aresDistributions={aresDistributions}
-                    aresInitialized={aresInitialized}
+                    loading={distributionsLoading}
                   />
                   <EpisodePreview datasetData={datasetData} />
                 </>
@@ -418,7 +642,7 @@ export default function DatasetPage() {
                   <DatasetDistributions 
                     datasetName={datasetName} 
                     aresDistributions={aresDistributions}
-                    aresInitialized={aresInitialized}
+                    loading={distributionsLoading}
                   />
                   <EpisodePreview datasetData={datasetData} />
                 </>

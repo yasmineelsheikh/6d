@@ -44,11 +44,15 @@ def generate_prompt_variations(
     Returns a list of (axis_changed, new_caption) tuples, in the same order
     as the input prompts.
     """
-
+    print(f"[DEBUG] generate_prompt_variations: Starting with {len(prompts)} prompts, model={model}, axes={axes}")
+    
     if completion is None:
         # Fallback: no augmentation if LLM is unavailable.
+        print(f"[DEBUG] generate_prompt_variations: completion is None, falling back to unchanged prompts")
         return [("None", p) for p in prompts]
 
+    print(f"[DEBUG] generate_prompt_variations: completion is available, proceeding with LLM call")
+    
     axes_text = ", ".join(axes)
     analysis_text = current_analysis or (
         "No detailed statistics are provided. In general, prefer conditions "
@@ -58,6 +62,7 @@ def generate_prompt_variations(
     task_text = task_description or (
         "The robot is performing manipulation tasks appropriate to the scene."
     )
+    print(f"[DEBUG] generate_prompt_variations: Built context - axes_text={axes_text}, task_text length={len(task_text)}, analysis_text length={len(analysis_text)}")
 
     system_message = (
         "You adapt detailed scene descriptions for robot videos to create a more "
@@ -110,6 +115,9 @@ def generate_prompt_variations(
         "]\n\n"
         "Now generate the list for all captions given above."
     )
+    
+    print(f"[DEBUG] generate_prompt_variations: Built messages - system_message length={len(system_message)}, user_message length={len(user_message)}")
+    print(f"[DEBUG] generate_prompt_variations: Making LLM call to model={model}")
 
     resp = completion(
         model=model,
@@ -118,22 +126,31 @@ def generate_prompt_variations(
             {"role": "user", "content": user_message},
         ],
     )
+    
+    print(f"[DEBUG] generate_prompt_variations: LLM call completed, response type={type(resp)}")
 
     try:
         content: Optional[str] = resp["choices"][0]["message"]["content"]  # type: ignore[index]
-    except Exception:
+        print(f"[DEBUG] generate_prompt_variations: Extracted content from response, content length={len(content) if content else 0}")
+    except Exception as e:
         # If anything unexpected happens, fall back to identity mapping.
+        print(f"[DEBUG] generate_prompt_variations: Exception extracting content from response: {type(e).__name__}: {e}")
+        print(f"[DEBUG] generate_prompt_variations: Falling back to unchanged prompts (exception path)")
         return [("None", p) for p in prompts]
 
     raw = (content or "").strip()
+    print(f"[DEBUG] generate_prompt_variations: Raw content after strip, length={len(raw)}")
+    print(f"[DEBUG] generate_prompt_variations: Raw content preview (first 500 chars): {raw[:500]}")
 
     # Parse the Python list of tuples safely.
     import ast
+    print(f"[DEBUG] generate_prompt_variations: Attempting to parse response with ast.literal_eval")
     try:
         parsed = ast.literal_eval(raw)
+        print(f"[DEBUG] generate_prompt_variations: Parsing successful, parsed type={type(parsed)}, length={len(parsed) if isinstance(parsed, (list, tuple)) else 'N/A'}")
         # Basic sanity check: list of (axis, caption) pairs
         out: List[Tuple[str, str]] = []
-        for item in parsed:
+        for idx, item in enumerate(parsed):
             if (
                 isinstance(item, (list, tuple))
                 and len(item) == 2
@@ -141,11 +158,19 @@ def generate_prompt_variations(
                 and isinstance(item[1], str)
             ):
                 out.append((item[0], item[1].strip()))
+                print(f"[DEBUG] generate_prompt_variations: Parsed item {idx+1}: axis='{item[0]}', caption length={len(item[1])}")
+            else:
+                print(f"[DEBUG] generate_prompt_variations: Item {idx+1} failed validation - type={type(item)}, is_list_or_tuple={isinstance(item, (list, tuple))}, len={len(item) if isinstance(item, (list, tuple)) else 'N/A'}")
         # If parsing fails or output length mismatches, degrade gracefully.
+        print(f"[DEBUG] generate_prompt_variations: Parsed {len(out)} valid items, expected {len(prompts)}")
         if len(out) != len(prompts):
+            print(f"[DEBUG] generate_prompt_variations: Length mismatch! Falling back to unchanged prompts (length mismatch path)")
             return [("None", p) for p in prompts]
+        print(f"[DEBUG] generate_prompt_variations: Successfully generated {len(out)} variations")
         return out
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] generate_prompt_variations: Exception during parsing: {type(e).__name__}: {e}")
+        print(f"[DEBUG] generate_prompt_variations: Falling back to unchanged prompts (parsing exception path)")
         return [("None", p) for p in prompts]
 
 

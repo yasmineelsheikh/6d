@@ -58,56 +58,7 @@ export default function AresDashboard() {
   const [heroData, setHeroData] = useState<any | null>(null)
   const [robotArrayPlots, setRobotArrayPlots] = useState<Visualization[]>([])
 
-  // Initialize ARES data
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true)
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 60000)
-        
-        const response = await fetch('/api/ares/initialize', {
-          method: 'POST',
-          signal: controller.signal,
-        })
-        clearTimeout(timeoutId)
-        
-        if (!response.ok) {
-          let errorMessage = `Failed to initialize ARES: ${response.status} ${response.statusText}`
-          try {
-            const text = await response.text()
-            try {
-              const errorData = JSON.parse(text)
-              errorMessage = errorData.detail || errorData.message || text || errorMessage
-            } catch {
-              errorMessage = text || errorMessage
-            }
-          } catch (e) {
-            // Keep default error message
-          }
-          throw new Error(errorMessage)
-        }
-        
-        const initData = await response.json()
-        const stateResponse = await fetch('/api/ares/state')
-        if (!stateResponse.ok) {
-          throw new Error('Failed to get state')
-        }
-        const stateData = await stateResponse.json()
-        setState(stateData)
-        setInitialized(true)
-      } catch (err: any) {
-        let errorMsg = err.message || err.toString() || 'Unknown error occurred'
-        if (err.name === 'AbortError') {
-          errorMsg = 'Initialization timed out after 60 seconds.'
-        }
-        setError(errorMsg)
-      } finally {
-        setLoading(false)
-      }
-    }
-    init()
-  }, [])
+  // ARES initialization removed - data loads lazily when needed
 
   // Load filter metadata
   useEffect(() => {
@@ -203,17 +154,8 @@ export default function AresDashboard() {
           }
         }
 
-        // Load distributions for filtered data
-        const distResponse = await fetch('/api/ares/distributions')
-        if (distResponse.ok) {
-          const distData = await distResponse.json()
-          const vizs = distData.visualizations || []
-          setDistributions(vizs)
-          // Reset to first tab when distributions change
-          if (vizs.length > 0) {
-            setActiveDistributionTab(0)
-          }
-        }
+        // Distributions are loaded from the dataset-specific pages with proper parameters
+        // Don't load them here to avoid duplicate generation
 
         // Load time series
         const timeResponse = await fetch('/api/ares/time-series')
