@@ -20,7 +20,7 @@ interface DatasetDistributionsProps {
   datasetName: string
   isCurated?: boolean
   aresDistributions?: Visualization[]
-  aresInitialized?: boolean
+  loading?: boolean
 }
 
 type MainTab = 'environment' | 'state-space' | 'action-space'
@@ -30,11 +30,26 @@ export default function DatasetDistributions({
   datasetName, 
   isCurated = false,
   aresDistributions = [],
-  aresInitialized = false
+  loading = false
 }: DatasetDistributionsProps) {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('environment')
   const [activeEnvSubTab, setActiveEnvSubTab] = useState<EnvironmentSubTab>('objects')
   const [activeStateSubTab, setActiveStateSubTab] = useState<'trajectory'>('trajectory')
+  
+  // Auto-select first available tab when distributions load
+  useEffect(() => {
+    if (aresDistributions.length > 0 && activeMainTab === 'environment') {
+      // Get the first distribution's tab key
+      const firstTabKey = aresDistributions[0].title.toLowerCase().replace(/\s+/g, '-')
+      // Only update if the current tab doesn't match any available distribution
+      const currentTabExists = aresDistributions.some(
+        dist => dist.title.toLowerCase().replace(/\s+/g, '-') === activeEnvSubTab
+      )
+      if (!currentTabExists) {
+        setActiveEnvSubTab(firstTabKey as EnvironmentSubTab)
+      }
+    }
+  }, [aresDistributions, activeMainTab, activeEnvSubTab])
   
   // Map ares distribution titles to sub-tabs
   const getDistributionByTitle = (title: string): Visualization | undefined => {
@@ -166,7 +181,11 @@ export default function DatasetDistributions({
         <div className="bg-[#1a1a1a] border border-[#2a2a2a]">
           {activeMainTab === 'environment' && (
             <>
-              {aresInitialized && aresDistributions.length > 0 ? (
+              {loading ? (
+                <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
+                  Loading distributions...
+                </div>
+              ) : aresDistributions.length > 0 ? (
                 <div className="p-4">
                   {aresDistributions.map((dist, idx) => {
                     const tabKey = dist.title.toLowerCase().replace(/\s+/g, '-')
@@ -183,11 +202,11 @@ export default function DatasetDistributions({
                     ) : null
                   })}
                 </div>
-              ) : !aresInitialized ? (
+              ) : (
                 <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
-                  Loading distributions...
+                  No distributions available
                 </div>
-              ) : null}
+              )}
             </>
           )}
           {activeMainTab === 'state-space' && (
@@ -205,4 +224,7 @@ export default function DatasetDistributions({
     </div>
   )
 }
+
+
+
 

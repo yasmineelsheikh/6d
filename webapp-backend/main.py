@@ -7,6 +7,8 @@ import json
 import os
 import sys
 import tempfile
+import importlib.util
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import traceback
@@ -321,6 +323,41 @@ async def test_endpoint():
     """Simple test endpoint to verify backend is working."""
     return {"status": "ok", "message": "Backend API is working"}
 
+@app.post("/api/database/clear")
+async def clear_database():
+    """Clear/reset the entire rollout database. Called when user starts a new task."""
+    try:
+        from ares.databases.structured_database import ROBOT_DB_PATH, RolloutSQLModel, setup_database
+        from sqlalchemy import text
+
+        # Clear the rollout table
+        engine = setup_database(RolloutSQLModel, path=ROBOT_DB_PATH)
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM rollout"))
+
+        # Clear in-memory dataset paths
+        dataset_paths.clear()
+        ingestion_status.clear()  # Clear ingestion status tracking
+
+        # Clear ARES global state cache so fresh data is loaded after ingestion
+        try:
+            from ares_api import _global_state
+            _global_state.clear()
+            print("ARES global state cache cleared")
+        except Exception as cache_error:
+            print(f"Warning: Could not clear ARES cache: {cache_error}")
+
+        print("Database (rollout table) cleared and dataset paths reset")
+        return {
+            "success": True,
+            "message": "Database cleared",
+        }
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"Error clearing database: {error_detail}")
+        raise HTTPException(status_code=500, detail=f"Error clearing database: {str(e)}")
+
 # CORS middleware - allow all origins for development
 app.add_middleware(
     CORSMiddleware,
@@ -341,6 +378,8 @@ os.makedirs(tmp_dump_dir, exist_ok=True)
 
 # Store dataset paths in memory (dataset_name -> dataset_path)
 dataset_paths: Dict[str, str] = {}
+# Track ingestion status per dataset: "in_progress", "complete", or None (not started)
+ingestion_status: Dict[str, str] = {}
 
 # Request/Response models
 class DatasetLoadRequest(BaseModel):
@@ -415,6 +454,215 @@ def count_episodes_from_parquet(dataset_path: str) -> int:
     except Exception as e:
         print(f"Error counting episodes: {e}")
         return 0
+
+def run_ingestion_for_dataset(dataset_name: str, dataset_path: str, task: str = None):
+    """
+    Run the full ingestion pipeline for a dataset.
+    This populates robot_data.db with rollouts from the dataset's own videos directory.
+    """
+    # Mark ingestion as in progress
+    ingestion_status[dataset_name] = "in_progress"
+    print(f"[INFO] Ingestion started for dataset: {dataset_name}")
+    
+    try:
+        # Import necessary modules
+        from ares.databases.structured_database import ROBOT_DB_PATH, RolloutSQLModel, setup_database
+        from ares.models.shortcuts import get_nomic_embedder
+        from ares.utils.image_utils import split_video_to_frames
+        from sqlalchemy import text
+
+        # Dynamically import run_ingestion_pipeline from the project root main.py
+        main_path = project_root / "main.py"
+        spec = importlib.util.spec_from_file_location("ares_ingestion_main", main_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load main.py from {main_path}")
+        main_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(main_module)
+        run_ingestion_pipeline = getattr(main_module, "run_ingestion_pipeline")
+        from tqdm import tqdm
+
+        # Initialize VLM, engine, and embedder
+        vlm_name = "gpt-4o"
+        #vlm_name = "gpt-4o-mini"
+        #vlm_name = "claude-3-5-sonnet"
+        engine = setup_database(RolloutSQLModel, path=ROBOT_DB_PATH)
+        
+        # Clear the database for this dataset to ensure clean ingestion
+        print(f"Clearing existing rollouts for dataset '{dataset_name}' from database...")
+        with engine.begin() as conn:
+            # Delete rollouts for this specific dataset
+            conn.execute(
+                text("DELETE FROM rollout WHERE dataset_filename = :dataset_name"),
+                {"dataset_name": dataset_name}
+            )
+        print(f"Database cleared for dataset '{dataset_name}'")
+        
+        embedder = get_nomic_embedder()
+
+        # Use dataset_name as task if not provided
+        if task is None:
+            task = dataset_name
+
+        dataset_path_obj = Path(dataset_path)
+
+        # Load dataset info from meta/info.json if available
+        dataset_info_dict = load_dataset_info(dataset_path)
+
+        # Create full_dataset_info dict
+        dataset_formalname = dataset_info_dict.get("dataset_formalname", dataset_name) if dataset_info_dict else dataset_name
+        split_name = dataset_info_dict.get("split", "test") if dataset_info_dict else "test"
+        full_dataset_info = {
+            "Dataset": dataset_formalname,
+            "Dataset Filename": dataset_name,
+            "Dataset Formalname": dataset_formalname,
+            "Split": split_name,
+            "Robot": dataset_info_dict.get("robot_type") if dataset_info_dict else None,
+            "Robot Morphology": None,
+            "Gripper": None,
+            "Action Space": None,
+            "# RGB Cams": None,
+            "# Depth Cams": None,
+            "# Wrist Cams": None,
+            "Language Annotations": "Natural",
+            "Data Collect Method": "Expert Policy",
+            "Scene Type": None,
+            "Citation": "year={2024}",
+        }
+
+        # Define prep_for_oxe_episode function
+        def prep_for_oxe_episode(task: str, episode_filename: str):
+            """Force the videos and task information into the OpenXEmbodimentEpisode format."""
+            filename = episode_filename
+            try:
+                frames = split_video_to_frames(filename)
+            except Exception as e:
+                print(f"Error getting video frames for {filename}: {e}")
+                return None
+            metadata = {"file_path": filename}
+            steps = []
+            for i, frame in enumerate(frames):
+                # Observation should contain the image, not at the step level
+                observation = {"image": frame}
+                steps.append({
+                    "action": None,
+                    "is_first": i == 0,
+                    "is_last": i == len(frames) - 1,
+                    "is_terminal": False,
+                    "language_embedding": None,
+                    "language_instruction": task,
+                    "observation": observation,
+                })
+            return {"episode_metadata": metadata, "steps": steps}
+
+        # Create DemoIngestion class that iterates through videos in the dataset's own videos directory
+        class DemoIngestion:
+            def __init__(self, task: str, videos_dir: Path):
+                self.task = task
+                self._episodes = []
+
+                if not videos_dir.exists():
+                    print(f"Warning: Video directory {videos_dir} does not exist")
+                    return
+
+                # Find all episode video files in the directory
+                video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+                video_files = sorted([
+                    f for f in videos_dir.iterdir()
+                    if f.is_file() and f.suffix.lower() in video_extensions
+                ])
+
+                # Iterate through actual video files
+                for video_path in tqdm(video_files, desc=f"Loading episodes from {videos_dir}"):
+                    episode = prep_for_oxe_episode(task, str(video_path))
+                    if episode is not None:
+                        self._episodes.append(episode)
+                self._index = 0
+
+            def __iter__(self):
+                self._index = 0
+                return self
+
+            def __next__(self):
+                if self._index >= len(self._episodes):
+                    raise StopIteration
+                episode = self._episodes[self._index]
+                self._index += 1
+                return episode
+
+            def __len__(self):
+                return len(self._episodes)
+
+        videos_dir = dataset_path_obj / "videos"
+        ds = DemoIngestion(task, videos_dir)
+
+        if len(ds) == 0:
+            print(f"Warning: No episodes found for dataset {dataset_name} in {videos_dir}")
+            return
+
+        # Run the ingestion pipeline
+        print(f"Running ingestion pipeline for {dataset_name} from {videos_dir} ...")
+        run_ingestion_pipeline(
+            ds,
+            full_dataset_info,
+            dataset_formalname,
+            vlm_name,
+            engine,
+            dataset_name,
+            embedder,
+            split_name,
+        )
+        print(f"Ingestion pipeline completed for {dataset_name}")
+        
+        # Mark ingestion as complete BEFORE generating distributions
+        ingestion_status[dataset_name] = "complete"
+        print(f"[INFO] Ingestion completed for dataset: {dataset_name}")
+        
+        # Invalidate ARES cache so next API call reloads fresh data
+        try:
+            from ares_api import _global_state, generate_and_cache_distributions
+            # Clear the dataframe and related caches, but keep ENGINE/SESSION
+            keys_to_clear = ["df", "INDEX_MANAGER", "all_vecs", "all_ids", "annotations_db", "annotation_db_stats"]
+            # Also clear plot cache since we'll regenerate it
+            plot_cache_keys = [key for key in _global_state.keys() if key.startswith("plot_cache_")]
+            keys_to_clear.extend(plot_cache_keys)
+            for key in keys_to_clear:
+                if key in _global_state:
+                    del _global_state[key]
+            print(f"ARES cache invalidated after ingestion completion")
+            
+            # Generate plots for default Indoor environment after ingestion completes
+            # This ensures plots are ready immediately, but they're always generated fresh (use_cache=False)
+            print(f"[INGESTION] Generating distribution plots for {dataset_name} after ingestion...")
+            try:
+                from ares_api import get_dataframe, get_data_distributions
+                df = get_dataframe()
+                if not df.empty:
+                    # Generate Indoor plots with default axes (fresh, no cache)
+                    # Use "Color/Material" to match frontend naming, which will be normalized to "Materials"
+                    indoor_axes = ["Objects", "Lighting", "Color/Material"]
+                    print(f"[INGESTION] Proactive generation with axes: {indoor_axes}")
+                    indoor_plots = get_data_distributions(
+                        df, 
+                        environment="Indoor", 
+                        selected_axes=indoor_axes, 
+                        use_cache=False
+                    )
+                    print(f"[INGESTION] Generated {len(indoor_plots)} Indoor plots after ingestion")
+                else:
+                    print("DataFrame is empty, skipping plot generation")
+            except Exception as plot_error:
+                print(f"Warning: Could not generate plots after ingestion: {plot_error}")
+                traceback.print_exc()
+        except Exception as cache_error:
+            print(f"Warning: Could not invalidate ARES cache or generate plots: {cache_error}")
+            traceback.print_exc()
+
+    except Exception as e:
+        # Mark ingestion as failed
+        ingestion_status[dataset_name] = "failed"
+        error_trace = traceback.format_exc()
+        print(f"Error running ingestion pipeline for {dataset_name}: {error_trace}")
+        raise
 
 # API Endpoints
 @app.get("/")
@@ -547,10 +795,10 @@ async def upload_dataset(
             )
         
         # Validate dataset structure
-        if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists():
+        if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists() or not (upload_dir / "videos").exists():
             raise HTTPException(
                 status_code=400,
-                detail="Invalid LeRobot dataset structure. Directory must contain 'data/' and 'meta/' folders."
+                detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
             )
         
         # Run basic ingestion (no database creation)
@@ -562,6 +810,18 @@ async def upload_dataset(
         
         # Store the dataset path for later use
         dataset_paths[dataset_name] = str(upload_dir)
+        
+        # Run the full ingestion pipeline to populate robot_data.db in the background.
+        # This is best-effort for plots; core dataset info and previews do not depend on it.
+        print(f"Starting background ingestion pipeline for uploaded dataset: {dataset_name}")
+        try:
+            loop = asyncio.get_running_loop()
+            # Fire-and-forget: do not await, so upload can succeed regardless of ingestion outcome.
+            loop.run_in_executor(None, run_ingestion_for_dataset, dataset_name, str(upload_dir), dataset_name)
+        except Exception as ingestion_error:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error scheduling ingestion for {dataset_name}: {error_trace}")
         
         return {
             "success": True,
@@ -595,10 +855,10 @@ async def load_dataset(request: DatasetLoadRequest):
             if not dataset_path.exists():
                 raise HTTPException(status_code=400, detail=f"Path does not exist: {request.dataset_path}")
         
-        if not (dataset_path / "data").exists() or not (dataset_path / "meta").exists():
+        if not (dataset_path / "data").exists() or not (dataset_path / "meta").exists() or not (dataset_path / "videos").exists():
             raise HTTPException(
                 status_code=400,
-                detail="Invalid LeRobot dataset structure. Directory must contain 'data/' and 'meta/' folders."
+                detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
             )
         
         # Run basic ingestion (no database creation)
@@ -612,6 +872,18 @@ async def load_dataset(request: DatasetLoadRequest):
         
         # Store the dataset path for later use
         dataset_paths[request.dataset_name] = str(dataset_path)
+        
+        # Run the full ingestion pipeline to populate robot_data.db in the background.
+        # This is best-effort for plots; core dataset info and previews do not depend on it.
+        print(f"Starting background ingestion pipeline for loaded dataset: {request.dataset_name}")
+        try:
+            loop = asyncio.get_running_loop()
+            # Fire-and-forget: do not await, so load can succeed regardless of ingestion outcome.
+            loop.run_in_executor(None, run_ingestion_for_dataset, request.dataset_name, str(dataset_path), request.dataset_name)
+        except Exception as ingestion_error:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error scheduling ingestion for {request.dataset_name}: {error_trace}")
         
         return {
             "success": True,
@@ -661,46 +933,36 @@ async def get_dataset_data(dataset_name: str):
         if dataset_name not in dataset_paths:
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
-        # Read from parquet files
+        # Base dataset path
         dataset_path = dataset_paths[dataset_name]
-        data_path = Path(dataset_path) / "data"
-        
-        # Get video directory path
-        from ares.constants import ARES_VIDEO_DIR
-        video_base_dir = Path(ARES_VIDEO_DIR) / dataset_name
-        
+        dataset_path_obj = Path(dataset_path)
+
+        # Videos directory: each video file is treated as one episode
+        videos_dir = dataset_path_obj / "videos"
+
+        if not videos_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Videos directory not found for dataset '{dataset_name}'"
+            )
+
+        # Find all video files
+        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+        video_files = sorted(
+            f for f in videos_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in video_extensions
+        )
+
         episodes = []
-        if data_path.exists():
-            for chunk_path in data_path.glob("chunk-*"):
-                if chunk_path.is_dir():
-                    for parquet_file in chunk_path.glob("*.parquet"):
-                        try:
-                            df = pd.read_parquet(parquet_file)
-                            if 'episode_index' in df.columns:
-                                for episode_idx in df['episode_index'].unique():
-                                    episode_df = df[df['episode_index'] == episode_idx]
-                                    
-                                    # Check if video exists
-                                    video_path = video_base_dir / f"episode_{episode_idx}.mp4"
-                                    video_url = None
-                                    if video_path.exists():
-                                        video_url = f"/api/datasets/{dataset_name}/videos/{episode_idx}"
-                                    
-                                    # Get task instruction if available
-                                    task_instruction = None
-                                    if 'task_language_instruction' in episode_df.columns:
-                                        task_instruction = episode_df['task_language_instruction'].iloc[0] if len(episode_df) > 0 else None
-                                    
-                                    episodes.append({
-                                        "id": f"episode_{episode_idx}",
-                                        "episode_index": int(episode_idx),
-                                        "length": len(episode_df),
-                                        "video_url": video_url,
-                                        "task_language_instruction": task_instruction
-                                    })
-                        except Exception:
-                            continue
-        
+        for idx, video_path in enumerate(video_files):
+            episodes.append({
+                "id": f"episode_{idx}",
+                "episode_index": idx,
+                "length": None,  # length (timesteps) not derived here
+                "video_url": f"/api/datasets/{dataset_name}/videos/{idx}",
+                "task_language_instruction": None,  # not currently mapped from parquet
+            })
+
         return {
             "dataset_name": dataset_name,
             "data": episodes,
@@ -745,14 +1007,17 @@ async def run_augmentation(request: AugmentationRequest):
         from ares.models.shortcuts import get_vlm
         
         # Get VLM instance (same as used in ingestion)
-        # Default to gpt-4o, but could be configurable
-        vlm_name = "gpt-4o"  # Could be made configurable via request or config
+        # Using Gemini instead of OpenAI to avoid quota limits
+        vlm_name = "gpt-4o"  # Changed from "gpt-4o" to match ingestion and avoid quota limits
         vlm = get_vlm(vlm_name)
         
-        # Get video directory path
-        from ares.constants import ARES_VIDEO_DIR
-        video_dir = Path(ARES_VIDEO_DIR) / request.dataset_name
-        
+        # Get video directory path from the dataset's own videos folder
+        if request.dataset_name not in dataset_paths:
+            raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset_name}' not found")
+
+        dataset_path = Path(dataset_paths[request.dataset_name])
+        video_dir = dataset_path / "videos"
+
         if not video_dir.exists():
             raise HTTPException(
                 status_code=404,
@@ -794,15 +1059,45 @@ async def run_augmentation(request: AugmentationRequest):
         prompts_dir = project_root / "data" / "prompts" / request.dataset_name / f"{timestamp}_{unique_id}"
         prompts_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save each variation to a .txt file
+        # Get list of video files in sorted order (same order as descriptions were generated)
+        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+        video_files = sorted([
+            f for f in video_dir.iterdir() 
+            if f.is_file() and f.suffix.lower() in video_extensions
+        ])
+        
+        # Save each variation to a .txt file and build metadata
         saved_files = []
+        metadata = []
         for idx, (axis_changed, variation_text) in enumerate(variations):
             filename = f"variation_{idx+1:04d}.txt"
             file_path = prompts_dir / filename
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(variation_text)
             saved_files.append(str(file_path.relative_to(project_root)))
-            print(f"Saved variation {idx+1} to {file_path}")
+            
+            # Get corresponding video path (same index as description)
+            if idx < len(video_files):
+                video_path = video_files[idx]
+                # Store relative path from dataset root for S3 structure
+                # Format: videos/episode_XX.mp4 (relative to dataset directory)
+                video_relative_path = video_path.relative_to(dataset_path)
+            else:
+                # Fallback if mismatch (shouldn't happen, but handle gracefully)
+                video_relative_path = video_files[0].relative_to(dataset_path) if video_files else ""
+            
+            metadata.append({
+                "video_path": str(video_relative_path),
+                "txt_file_path": f"prompts/{timestamp}_{unique_id}/{filename}",
+                "axis": axis_changed
+            })
+            print(f"Saved variation {idx+1} to {file_path} (video: {video_relative_path}, axis: {axis_changed})")
+        
+        # Save metadata JSON file
+        metadata_file = prompts_dir / "metadata.json"
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2)
+        print(f"Saved metadata to {metadata_file}")
         
         # Upload entire folder to S3
         s3_prefix = f"input_data/{request.dataset_name}/prompts/{timestamp}_{unique_id}"
@@ -856,8 +1151,23 @@ async def get_episode_video(dataset_name: str, episode_index: int):
         if dataset_name not in dataset_paths:
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
-        from ares.constants import ARES_VIDEO_DIR
-        video_path = Path(ARES_VIDEO_DIR) / dataset_name / f"episode_{episode_index}.mp4"
+        # Serve from the dataset's own videos directory, using sorted video files
+        dataset_path = Path(dataset_paths[dataset_name])
+        videos_dir = dataset_path / "videos"
+
+        if not videos_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Videos directory not found for dataset '{dataset_name}'")
+
+        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+        video_files = sorted(
+            f for f in videos_dir.iterdir()
+            if f.is_file() and f.suffix.lower() in video_extensions
+        )
+
+        if episode_index < 0 or episode_index >= len(video_files):
+            raise HTTPException(status_code=404, detail=f"Video not found for episode {episode_index}")
+
+        video_path = video_files[episode_index]
         
         if not video_path.exists():
             raise HTTPException(status_code=404, detail=f"Video not found for episode {episode_index}")
@@ -920,59 +1230,6 @@ async def export_dataset(dataset_name: str, format: str = "csv"):
         raise HTTPException(status_code=500, detail=f"Error exporting dataset: {str(e)}")
 
 # ARES Dashboard API Endpoints (replacing Streamlit functionality)
-@app.post("/api/ares/initialize")
-async def initialize_ares():
-    """Initialize ARES data (replaces Streamlit's initialize_data)."""
-    try:
-        import traceback
-        print("[DEBUG] Starting initialize_ares endpoint...")
-        from ares_api import initialize_ares_data
-        print("[DEBUG] Calling initialize_ares_data...")
-        df = initialize_ares_data()
-        print(f"[DEBUG] initialize_ares_data completed, DataFrame shape: {df.shape}")
-        
-        # Convert columns to list of strings to ensure JSON serialization
-        try:
-            columns_list = [str(col) for col in df.columns]
-            print(f"[DEBUG] Converted {len(columns_list)} columns to strings")
-        except Exception as col_error:
-            print(f"[ERROR] Failed to convert columns: {col_error}")
-            columns_list = []
-        
-        result = {
-            "success": True,
-            "total_rows": int(len(df)),  # Ensure it's a Python int, not numpy int
-            "columns": columns_list,
-        }
-        print(f"[DEBUG] Returning result with {result['total_rows']} rows and {len(result['columns'])} columns")
-        
-        # Test JSON serialization before returning
-        try:
-            import json
-            json.dumps(result)
-            print("[DEBUG] Result is JSON serializable")
-        except Exception as json_error:
-            print(f"[ERROR] Result is not JSON serializable: {json_error}")
-            raise ValueError(f"Response is not JSON serializable: {json_error}")
-        
-        return result
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        error_detail = f"Error initializing ARES: {type(e).__name__}: {str(e)}\n\nTraceback:\n{error_trace}"
-        print(f"[ERROR] {error_detail}")
-        print(f"[ERROR] Exception type: {type(e).__name__}")
-        print(f"[ERROR] Exception args: {e.args if hasattr(e, 'args') else 'N/A'}")
-        # Ensure we return JSON with proper error format
-        try:
-            return JSONResponse(
-                status_code=500,
-                content={"detail": error_detail, "error_type": type(e).__name__, "error_message": str(e)}
-            )
-        except Exception as json_error:
-            print(f"[ERROR] Failed to create JSONResponse: {json_error}")
-            # Fallback - use HTTPException
-            raise HTTPException(status_code=500, detail=f"Error initializing ARES: {str(e)}")
 
 @app.get("/api/ares/state")
 async def get_ares_state():
@@ -1253,15 +1510,74 @@ async def apply_embedding_filters(selections: Dict[str, Any]):
         )
 
 @app.get("/api/ares/distributions")
-async def get_distributions():
-    """Get data distribution visualizations."""
+async def get_distributions(
+    environment: str | None = None,
+    axes: str | None = None,
+    dataset_name: str | None = None,
+):
+    """Get data distribution visualizations.
+    
+    Args:
+        environment: "Indoor" or "Outdoor" mode
+        axes: Comma-separated list of axis names (e.g., "Objects,Lighting,Materials")
+        dataset_name: Optional dataset name to check ingestion status
+    """
     try:
         import traceback
+        import json
         from ares_api import get_dataframe, get_data_distributions
-        print("[DEBUG] Getting distributions...")
+        
+        # Check if ingestion is in progress for this dataset
+        if dataset_name and dataset_name in ingestion_status:
+            status = ingestion_status[dataset_name]
+            if status == "in_progress":
+                print(f"[INFO] Ingestion in progress for {dataset_name}, returning empty visualizations")
+                return {"visualizations": [], "ingestion_status": "in_progress"}
+            elif status == "failed":
+                print(f"[WARNING] Ingestion failed for {dataset_name}, returning empty visualizations")
+                return {"visualizations": [], "ingestion_status": "failed"}
+        
         df = get_dataframe()
         print(f"[DEBUG] DataFrame shape: {df.shape}")
-        visualizations = get_data_distributions(df)
+        
+        # Return empty visualizations if database is empty (expected after "New Task")
+        if df.empty or len(df) == 0:
+            print("[INFO] Database is empty, returning empty visualizations (expected after 'New Task')")
+            return {"visualizations": []}
+        
+        # Parse axes parameter
+        # Debug: log what we received from the API request
+        print(f"[API] Received axes parameter: {repr(axes)}")
+        selected_axes = None
+        if axes is not None and axes != "":
+            try:
+                # Try parsing as JSON array first
+                parsed = json.loads(axes)
+                # Ensure it's a list (could be empty array [])
+                if isinstance(parsed, list):
+                    selected_axes = parsed
+                else:
+                    selected_axes = [parsed] if parsed else []
+                print(f"[API] Parsed axes as JSON: {selected_axes}")
+            except json.JSONDecodeError as e:
+                # Fall back to comma-separated string
+                selected_axes = [ax.strip() for ax in axes.split(",") if ax.strip()]
+                print(f"[API] Parsed axes as comma-separated (JSON parse failed: {e}): {selected_axes}")
+        else:
+            # If axes is None or empty string, set to empty list to respect user's explicit deselection
+            # The frontend always sends the axes parameter, so None/empty means user unchecked everything
+            selected_axes = []
+            print(f"[API] Axes parameter is None or empty, setting to empty list (user deselected all)")
+        
+        # Always call get_data_distributions even if dataframe is empty
+        # so it can return empty plots for selected axes
+        # use_cache=False to always generate fresh plots from current data
+        visualizations = get_data_distributions(
+            df,
+            environment=environment,
+            selected_axes=selected_axes,
+            use_cache=False,
+        )
         print(f"[DEBUG] Got {len(visualizations)} visualizations")
         return {"visualizations": visualizations}
     except Exception as e:

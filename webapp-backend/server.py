@@ -186,52 +186,81 @@ def run_cosmos_from_prompts(req: CosmosRequest):
             if not os.path.exists(prompts_base_path):
                 raise FileNotFoundError(f"Prompts folder not found at {prompts_base_path}")
             
-            # Find all prompt variation files in the prompts folder
-            prompt_files = []
+            # Find metadata.json file in the prompts folder
+            metadata_path = None
             for root, dirs, files in os.walk(prompts_base_path):
-                for file in files:
-                    if file.endswith('.txt'):
-                        prompt_files.append(os.path.join(root, file))
+                if "metadata.json" in files:
+                    metadata_path = os.path.join(root, "metadata.json")
+                    break
             
-            if not prompt_files:
-                raise FileNotFoundError(f"No prompt files found in {prompts_base_path}")
+            if not metadata_path or not os.path.exists(metadata_path):
+                raise FileNotFoundError(f"metadata.json not found in {prompts_base_path}")
             
-            print(f"Found {len(prompt_files)} prompt files to process")
+            # Load metadata
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
             
-            # Find video path
-            video_path = os.path.join(local_data_path, "videos", "episode_videos", "episode_01.mp4")
-            if not os.path.exists(video_path):
-                # Try to find any video file
-                video_files = []
-                for root, dirs, files in os.walk(local_data_path):
-                    for file in files:
-                        if file.endswith('.mp4'):
-                            video_files.append(os.path.join(root, file))
-                if not video_files:
-                    raise ValueError(f"No video files found in downloaded dataset")
-                video_path = video_files[0]
-                print(f"Using video: {video_path}")
+            if not metadata:
+                raise ValueError(f"metadata.json is empty or invalid")
             
-            # Process each prompt file
+            print(f"Found {len(metadata)} prompt variations in metadata")
+            
+            # Process each entry in metadata
             output_urls = []
-            for i, prompt_file_path in enumerate(prompt_files):
-                print(f"Processing prompt {i+1}/{len(prompt_files)}: {prompt_file_path}")
+            for i, entry in enumerate(metadata):
+                video_relative_path = entry.get("video_path", "")
+                txt_relative_path = entry.get("txt_file_path", "")
+                axis = entry.get("axis", "Unknown")
                 
-                # Use the existing prompt file directly
-                varied_prompt_path = prompt_file_path
+                # Resolve absolute paths from metadata relative paths
+                video_path = os.path.join(local_data_path, video_relative_path)
+                prompt_file_path = os.path.join(local_data_path, txt_relative_path)
+                
+                if not os.path.exists(video_path):
+                    print(f"Warning: Video not found at {video_path}, skipping entry {i+1}")
+                    continue
+                
+                if not os.path.exists(prompt_file_path):
+                    print(f"Warning: Prompt file not found at {prompt_file_path}, skipping entry {i+1}")
+                    continue
+                
+                print(f"Processing variation {i+1}/{len(metadata)}: {prompt_file_path} (axis: {axis}, video: {video_relative_path})")
+                
+                # Map axis names to spec template files
+                axis_to_spec = {
+                    "Lighting": "indoor_lighting_spec.json",
+                    "Objects": "objects_spec.json",
+                    "Color/Material": "color_texture_spec.json",
+                    "Materials": "color_texture_spec.json",  # Alias for Color/Material
+                    "Weather": "weather_spec.json",
+                    "Road Surface": "road_surface_spec.json",
+                    "Outdoor Lighting": "outdoor_lighting_spec.json",
+                }
+                
+                # Get spec template file name for this axis
+                spec_filename = axis_to_spec.get(axis)
+                if not spec_filename:
+                    print(f"Warning: Unknown axis '{axis}', using default spec. Available axes: {list(axis_to_spec.keys())}")
+                    spec_filename = "objects_spec.json"  # Default fallback
+                
+                # Load spec template from spec_templates directory
+                spec_templates_dir = Path(__file__).parent / "spec_templates"
+                spec_file_path = spec_templates_dir / spec_filename
+                
+                if not spec_file_path.exists():
+                    raise FileNotFoundError(f"Spec template not found: {spec_file_path}")
+                
+                # Load the spec template
+                with open(spec_file_path, 'r') as f:
+                    cosmos_input = json.load(f)
+                
+                # Override with prompt_path and video_path from metadata
+                cosmos_input["name"] = dataset_name
+                cosmos_input["prompt_path"] = f"{prompt_file_path}"
+                cosmos_input["video_path"] = f"{video_path}"
                 
                 # Prepare JSON input for Cosmos
                 cosmos_input_spec = os.path.join(temp_dir, f"input_spec_{i}.json")
-                cosmos_input = {
-                    "name": "stack_cups",
-                    "prompt_path": f"{varied_prompt_path}",
-                    "video_path": f"{video_path}",
-                    "guidance": 3,
-                    "depth": {"control_weight": 1.0},
-                    "seg": {"control_weight": 1.0},
-                    "edge": {"control_weight": 0.5},
-                    "vis": {"control_weight": 0.2}
-                }
                 with open(cosmos_input_spec, "w") as f:
                     json.dump(cosmos_input, f, indent=2)
                 
@@ -244,14 +273,14 @@ def run_cosmos_from_prompts(req: CosmosRequest):
                 
                 try:
                     result = subprocess.run(command)
-                    print(f"Completed processing prompt {i+1}/{len(prompt_files)}")
+                    print(f"Completed processing variation {i+1}/{len(metadata)} (axis: {axis})")
                 except subprocess.CalledProcessError as e:
-                    print(f"Error processing prompt {i+1}: {e}")
-                    continue  # Continue with next prompt if this one fails
+                    print(f"Error processing variation {i+1}: {e}")
+                    continue  # Continue with next variation if this one fails
             
             if not output_urls:
                 # Return success even if no outputs were uploaded (since upload code is commented out)
-                return {"success": True, "processed_prompts": len(prompt_files), "message": "All prompts processed"}
+                return {"success": True, "processed_variations": len(metadata), "message": "All variations processed"}
             
             return {"s3_url": output_urls[0] if len(output_urls) == 1 else output_urls}
            

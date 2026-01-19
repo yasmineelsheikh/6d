@@ -2,15 +2,13 @@
 FastAPI backend module that replaces Streamlit's server-side functionality.
 Provides REST API endpoints for all ARES dashboard features.
 
-This module wraps the existing ares.app functionality and removes Streamlit dependencies
-by using a global state dictionary instead of Streamlit's session state.
+This module implements ARES functionality without Streamlit dependencies,
+using a global state dictionary instead of Streamlit's session state.
 """
 
 import os
 import json
 import traceback
-import sys
-import types
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 import pandas as pd
@@ -20,53 +18,7 @@ from sqlalchemy.orm import Session
 
 from fastapi import HTTPException
 
-# CRITICAL: Set up Streamlit mock BEFORE importing any ares modules
-# This ensures that when ares modules import streamlit, they get our mock
-class MockSessionState:
-    def __init__(self):
-        self._data = {}
-    
-    def __getitem__(self, key):
-        return self._data[key]
-    
-    def __setitem__(self, key, value):
-        self._data[key] = value
-    
-    def __contains__(self, key):
-        return key in self._data
-    
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-    
-    def keys(self):
-        return self._data.keys()
-    
-    # Support attribute access (e.g., st.session_state.ENGINE)
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        return self._data.get(name)
-    
-    def __setattr__(self, name, value):
-        if name.startswith('_'):
-            super().__setattr__(name, value)
-        else:
-            self._data[name] = value
-
-# Create and inject mock streamlit module
-# Force replace to ensure our mock is used
-streamlit_module = types.ModuleType('streamlit')
-streamlit_module.session_state = MockSessionState()
-sys.modules['streamlit'] = streamlit_module
-
-# Also try to update any existing references
-try:
-    import streamlit
-    streamlit.session_state = MockSessionState()
-except:
-    pass
-
-# Now import ares modules (they will use our mock streamlit)
+# Import ares modules (non-Streamlit parts only)
 from ares.app.data_analysis import generate_automatic_visualizations
 from ares.app.viz_helpers import (
     generate_success_rate_visualizations,
@@ -86,6 +38,7 @@ from ares.databases.embedding_database import (
     FaissIndex,
     IndexManager,
 )
+from ares.utils.clustering import cluster_embeddings
 from ares.constants import ARES_DATA_DIR
 
 # Global state (replaces Streamlit session state)
@@ -94,9 +47,60 @@ tmp_dump_dir = os.path.join(ARES_DATA_DIR, "webapp_tmp")
 os.makedirs(tmp_dump_dir, exist_ok=True)
 
 
-def _setup_streamlit_mock():
-    """Return the mock Streamlit session state (already set up at module level)."""
-    return sys.modules['streamlit'].session_state
+def _load_cached_embeddings(
+    tmp_dump_dir: str, index_name: str, stored_embeddings: np.ndarray
+) -> tuple | None:
+    """
+    Load cached embedding visualizations if available.
+    """
+    embeddings_path = os.path.join(tmp_dump_dir, f"{index_name}_embeddings.npy")
+    clusters_path = os.path.join(tmp_dump_dir, f"{index_name}_clusters.npz")
+    ids_path = os.path.join(tmp_dump_dir, f"{index_name}_ids.npy")
+
+    if not (
+        os.path.exists(embeddings_path)
+        and os.path.exists(clusters_path)
+        and os.path.exists(ids_path)
+    ):
+        return None
+
+    loaded_embeddings = np.load(embeddings_path)
+    if not (
+        len(loaded_embeddings) == len(stored_embeddings)
+        and np.allclose(loaded_embeddings, stored_embeddings)
+    ):
+        # this means we have new embeddings
+        return None
+
+    # Valid cached data found - load everything
+    clusters_data = np.load(clusters_path)
+    loaded_ids = np.load(ids_path)
+    return (
+        loaded_embeddings,
+        clusters_data["reduced"],
+        clusters_data["labels"],
+        loaded_ids,
+    )
+
+
+def _save_embeddings(
+    tmp_dump_dir: str,
+    index_name: str,
+    embeddings: np.ndarray,
+    reduced: np.ndarray,
+    labels: np.ndarray,
+    ids: np.ndarray,
+) -> None:
+    """
+    Save reduced embeddings, clusters, and IDs to disk
+    """
+    embeddings_path = os.path.join(tmp_dump_dir, f"{index_name}_embeddings.npy")
+    clusters_path = os.path.join(tmp_dump_dir, f"{index_name}_clusters.npz")
+    ids_path = os.path.join(tmp_dump_dir, f"{index_name}_ids.npy")
+
+    np.save(embeddings_path, embeddings)
+    np.savez(clusters_path, reduced=reduced, labels=labels)
+    np.save(ids_path, ids)
 
 
 def _extract_file_path_from_sqlite_url(url: str) -> str:
@@ -112,17 +116,18 @@ def _extract_file_path_from_sqlite_url(url: str) -> str:
 
 
 def initialize_ares_data() -> pd.DataFrame:
-    """Initialize ARES data (replaces initialize_data from init_data.py)."""
+    """Initialize ARES data without Streamlit dependencies."""
     global _global_state
     
     # Skip if already initialized
     if all(key in _global_state for key in ["ENGINE", "SESSION", "df", "INDEX_MANAGER"]):
+        print("[INFO] ARES data already initialized, returning cached DataFrame.")
         return _global_state["df"]
     
     try:
         # Extract actual file paths from connection strings
         robot_db_file = _extract_file_path_from_sqlite_url(ROBOT_DB_PATH)
-        embedding_db_dir = EMBEDDING_DB_PATH  # This should already be a directory path
+        embedding_db_dir = EMBEDDING_DB_PATH
         
         # Check if database files exist
         if not os.path.exists(robot_db_file):
@@ -137,166 +142,86 @@ def initialize_ares_data() -> pd.DataFrame:
                 f"Please run ares_ingestion.py first to create the database."
             )
         
-        # Ensure mock is set up
-        mock_st = _setup_streamlit_mock()
-        print(f"[DEBUG] Mock session state type: {type(mock_st)}")
-        print(f"[DEBUG] Mock session state keys before init: {list(mock_st.keys())}")
+        # Initialize database and session
+        print("Initializing database and session")
+        engine = setup_database(RolloutSQLModel, path=ROBOT_DB_PATH)
+        sess = Session(engine)
+        _global_state["ENGINE"] = engine
+        _global_state["SESSION"] = sess
         
-        # Verify streamlit module has our mock
-        import streamlit as st_check
-        print(f"[DEBUG] streamlit module session_state type: {type(st_check.session_state)}")
-        print(f"[DEBUG] Is our mock? {isinstance(st_check.session_state, MockSessionState)}")
+        # Load dataframe
+        print("Loading dataframe")
+        query = select(RolloutSQLModel)
+        df = pd.read_sql(query, engine)
+        # Filter out unnamed columns
+        df = df[[c for c in df.columns if "unnamed" not in c.lower()]]
+        _global_state["df"] = df
         
-        # Use existing initialize_data function but sync with our global state
-        print("[DEBUG] Importing initialize_data...")
+        # Initialize index manager
+        print("Initializing index manager")
+        index_manager = IndexManager(base_dir=EMBEDDING_DB_PATH, index_class=FaissIndex)
+        _global_state["INDEX_MANAGER"] = index_manager
         
-        # Ensure streamlit is mocked before importing init_data
-        print("[DEBUG] Checking streamlit mock before import...")
-        import streamlit as st_precheck
-        print(f"[DEBUG] streamlit module loaded, session_state type: {type(st_precheck.session_state)}")
-        if not isinstance(st_precheck.session_state, MockSessionState):
-            print("[WARNING] streamlit.session_state is not our mock before import!")
-            st_precheck.session_state = MockSessionState()
-            sys.modules['streamlit'].session_state = MockSessionState()
+        # Get all vectors and their IDs
+        print("Getting all vectors and their IDs")
+        all_data = index_manager.get_all_matrices()
+        _global_state["all_vecs"] = {
+            name: data["arrays"] for name, data in all_data.items()
+        }
+        _global_state["all_ids"] = {name: data["ids"] for name, data in all_data.items()}
         
-        print("[DEBUG] About to import ares.app.init_data...")
-        print("[DEBUG] Testing individual imports to find which one hangs...")
-        import time
+        # Create tmp directory if it doesn't exist
+        os.makedirs(tmp_dump_dir, exist_ok=True)
         
-        # Test imports one by one to find the culprit
-        # Note: ares.models.base is skipped because it hangs - we've made it lazy in init_data.py
-        test_imports = [
-            ("os", "os"),
-            ("numpy", "np"),
-            ("pandas", "pd"),
-            ("streamlit", "st"),
-            ("sqlalchemy", "sqlalchemy"),
-            ("ares.databases.annotation_database", "ANNOTATION_DB_PATH"),
-            ("ares.databases.embedding_database", "EMBEDDING_DB_PATH"),
-            ("ares.databases.structured_database", "ROBOT_DB_PATH"),
-            ("ares.utils.clustering", "cluster_embeddings"),
-        ]
-        
-        for import_name, attr_name in test_imports:
-            try:
-                print(f"[DEBUG] Testing import: {import_name}...")
-                start = time.time()
-                if "." in import_name:
-                    parts = import_name.split(".")
-                    mod = __import__(import_name, fromlist=[parts[-1]])
-                else:
-                    mod = __import__(import_name)
-                elapsed = time.time() - start
-                if elapsed > 1.0:
-                    print(f"[WARNING] {import_name} took {elapsed:.2f} seconds to import")
-                else:
-                    print(f"[DEBUG] {import_name} imported in {elapsed:.2f} seconds")
-            except Exception as e:
-                print(f"[ERROR] Failed to import {import_name}: {type(e).__name__}: {str(e)}")
-        
-        # Now try importing the actual module
-        print("[DEBUG] Now importing ares.app.init_data module...")
-        start_time = time.time()
-        try:
-            import ares.app.init_data as init_data_module
-            elapsed = time.time() - start_time
-            print(f"[DEBUG] Module imported (took {elapsed:.2f} seconds)")
-            
-            # Now get the function
-            print("[DEBUG] Getting initialize_data function from module...")
-            initialize_data = init_data_module.initialize_data
-            print(f"[DEBUG] Successfully got initialize_data function")
-            
-        except ImportError as import_error:
-            elapsed = time.time() - start_time
-            print(f"[ERROR] Failed to import after {elapsed:.2f} seconds: {type(import_error).__name__}: {str(import_error)}")
-            traceback.print_exc()
-            raise RuntimeError(f"Failed to import init_data module: {str(import_error)}") from import_error
-        except Exception as import_error:
-            elapsed = time.time() - start_time
-            print(f"[ERROR] Unexpected error importing after {elapsed:.2f} seconds: {type(import_error).__name__}: {str(import_error)}")
-            traceback.print_exc()
-            raise RuntimeError(f"Unexpected error importing init_data: {str(import_error)}") from import_error
-        
-        # Verify streamlit is still mocked after import
-        print("[DEBUG] Verifying streamlit mock after import...")
-        import streamlit as st_check2
-        print(f"[DEBUG] After import, streamlit session_state type: {type(st_check2.session_state)}")
-        if not isinstance(st_check2.session_state, MockSessionState):
-            print("[WARNING] streamlit.session_state is not our mock after import!")
-            # Force replace it
-            st_check2.session_state = MockSessionState()
-            sys.modules['streamlit'].session_state = MockSessionState()
-        
-        # Also check if init_data module has its own st reference
-        print("[DEBUG] Checking init_data module for st reference...")
-        import ares.app.init_data as init_data_module
-        if hasattr(init_data_module, 'st'):
-            if not isinstance(init_data_module.st.session_state, MockSessionState):
-                print("[WARNING] init_data.st.session_state is not our mock!")
-                init_data_module.st.session_state = MockSessionState()
-        
-        print(f"[DEBUG] About to call initialize_data with tmp_dump_dir: {tmp_dump_dir}")
-        try:
-            initialize_data(tmp_dump_dir)
-            print(f"[DEBUG] initialize_data completed successfully")
-        except Exception as init_error:
-            error_type = type(init_error).__name__
-            error_msg = str(init_error)
-            error_trace = traceback.format_exc()
-            print(f"[ERROR] initialize_data failed:")
-            print(f"  Type: {error_type}")
-            print(f"  Message: {error_msg}")
-            print(f"  Traceback:\n{error_trace}")
-            # Re-raise with more context
-            raise RuntimeError(
-                f"Failed to initialize data: {error_type}: {error_msg}\n\n"
-                f"Full traceback:\n{error_trace}"
-            ) from init_error
-        
-        print(f"[DEBUG] Mock session state keys after init: {list(mock_st.keys())}")
-        
-        # Copy from mock session state to global state
-        _global_state["ENGINE"] = mock_st.get("ENGINE")
-        _global_state["SESSION"] = mock_st.get("SESSION")
-        _global_state["df"] = mock_st.get("df")
-        _global_state["INDEX_MANAGER"] = mock_st.get("INDEX_MANAGER")
-        _global_state["all_vecs"] = mock_st.get("all_vecs", {})
-        _global_state["all_ids"] = mock_st.get("all_ids", {})
-        _global_state["annotations_db"] = mock_st.get("annotations_db")
-        _global_state["annotation_db_stats"] = mock_st.get("annotation_db_stats", {})
-        
-        # Also copy embedding data
-        print(f"[DEBUG] Copying embedding data for META_INDEX_NAMES: {META_INDEX_NAMES}")
-        print(f"[DEBUG] Mock session state keys: {list(mock_st._data.keys())[:30]}...")  # Show first 30 keys
-        
+        # Process each index type
         for index_name in META_INDEX_NAMES:
-            for key in [f"{index_name}_embeddings", f"{index_name}_reduced", f"{index_name}_labels", f"{index_name}_ids"]:
-                if key in mock_st._data:
-                    _global_state[key] = mock_st._data[key]
-                    print(f"[DEBUG] Copied {key} to _global_state (shape: {getattr(_global_state[key], 'shape', 'N/A')})")
+            print(f"Processing {index_name} index")
+            if index_name not in index_manager.indices:
+                print(f"Index {index_name} not found, skipping.")
+                continue
+            try:
+                print(f"  Getting vectors and IDs for {index_name}...")
+                stored_embeddings = index_manager.indices[index_name].get_all_vectors()
+                stored_ids = index_manager.indices[index_name].get_all_ids()
+                print(f"  Found {len(stored_embeddings)} embeddings for {index_name}")
+                
+                # Try loading from cache first
+                print(f"  Checking cache for {index_name}...")
+                cached_data = _load_cached_embeddings(
+                    tmp_dump_dir, index_name, stored_embeddings
+                )
+                if cached_data is not None:
+                    print(f"  Using cached data for {index_name}")
+                    embeddings, reduced, labels, ids = cached_data
                 else:
-                    print(f"[DEBUG] Key {key} not found in mock_st._data")
+                    # Create new embeddings and clusters
+                    print(f"  Computing clusters for {index_name} (this may take a while)...")
+                    embeddings = stored_embeddings
+                    reduced, labels, _ = cluster_embeddings(embeddings)
+                    ids = stored_ids
+                    print(f"  Saving embeddings for {index_name}...")
+                    _save_embeddings(tmp_dump_dir, index_name, embeddings, reduced, labels, ids)
+                    print(f"  Completed clustering for {index_name}")
+                
+                # Store in global state
+                print(f"  Storing {index_name} in global state...")
+                _global_state[f"{index_name}_embeddings"] = embeddings
+                _global_state[f"{index_name}_reduced"] = reduced
+                _global_state[f"{index_name}_labels"] = labels
+                _global_state[f"{index_name}_ids"] = stored_ids
+                print(f"  Successfully processed {index_name}")
+            except Exception as e:
+                print(f"  ERROR processing {index_name}: {type(e).__name__}: {str(e)}")
+                traceback.print_exc()
+                # Continue with other indices even if one fails
+                continue
         
-        # Debug: show what embedding keys we have
-        embedding_keys = [k for k in _global_state.keys() if any(name in k for name in META_INDEX_NAMES)]
-        print(f"[DEBUG] Embedding keys in _global_state: {embedding_keys}")
-        
-        # Also check if embeddings exist in mock_st but weren't copied
-        mock_embedding_keys = [k for k in mock_st._data.keys() if any(name in k for name in META_INDEX_NAMES)]
-        print(f"[DEBUG] Embedding keys in mock_st._data: {mock_embedding_keys}")
-        
-        if "df" not in _global_state or _global_state["df"] is None:
-            raise ValueError("DataFrame was not initialized properly")
-        
+        # Empty database is valid after "New Task" - return empty DataFrame gracefully
         if _global_state["df"].empty:
-            raise ValueError(
-                f"DataFrame is empty. Database at {ROBOT_DB_PATH} exists but contains no data. "
-                f"Please ensure ares_ingestion.py completed successfully."
-            )
+            print(f"[INFO] DataFrame is empty (database cleared or no data ingested yet). This is expected after 'New Task'.")
+            return _global_state["df"]
         
         print(f"[DEBUG] Successfully initialized. DataFrame shape: {_global_state['df'].shape}")
-        print(f"[DEBUG] Returning DataFrame with {len(_global_state['df'])} rows")
         return _global_state["df"]
     except Exception as e:
         error_msg = f"Error in initialize_ares_data: {type(e).__name__}: {str(e)}"
@@ -310,6 +235,56 @@ def get_dataframe() -> pd.DataFrame:
     if "df" not in _global_state:
         return initialize_ares_data()
     return _global_state["df"]
+
+
+def _get_cache_key(environment: str | None, selected_axes: list[str] | None) -> str:
+    """Generate a cache key for plots based on environment and axes."""
+    env = environment or "default"
+    axes_str = ",".join(sorted(selected_axes)) if selected_axes else "default"
+    return f"distributions_{env}_{axes_str}"
+
+
+def generate_and_cache_distributions(environment: str | None = None, selected_axes: list[str] | None = None) -> None:
+    """
+    Generate distribution plots for the specified environment and axes, and cache them.
+    
+    Args:
+        environment: "Indoor" or "Outdoor". If None, defaults to "Indoor".
+        selected_axes: List of axis names. If None, uses default axes for the environment.
+    """
+    global _global_state
+    
+    try:
+        # Default to Indoor if not specified
+        if environment is None:
+            environment = "Indoor"
+        
+        # Get default axes for the environment if not specified
+        if selected_axes is None:
+            if environment == "Indoor":
+                selected_axes = ["Objects", "Lighting", "Materials"]
+            else:  # Outdoor
+                selected_axes = ["Objects", "Lighting", "Weather", "Road Surface"]
+        
+        print(f"[INFO] Generating and caching {environment} distribution plots with axes: {selected_axes}...")
+        
+        # Get fresh dataframe
+        df = get_dataframe()
+        
+        if df.empty:
+            print("[WARNING] DataFrame is empty, skipping plot generation")
+            return
+        
+        # Generate plots for the specified environment
+        cache_key = _get_cache_key(environment, selected_axes)
+        # Use use_cache=False to avoid recursion when generating initial cache
+        plots = get_data_distributions(df, environment=environment, selected_axes=selected_axes, use_cache=False)
+        _global_state[f"plot_cache_{cache_key}"] = plots
+        print(f"[INFO] Cached {len(plots)} {environment} plots")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to generate and cache distributions: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
 
 
 def get_state_info() -> Dict[str, Any]:
@@ -346,16 +321,7 @@ def get_state_info() -> Dict[str, Any]:
 
 
 def apply_structured_filters(df: pd.DataFrame, filters: Optional[Dict[str, Any]] = None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Apply structured data filters using existing filter_helpers logic."""
-    # Setup mock Streamlit for compatibility
-    mock_st = _setup_streamlit_mock()
-    
-    # Sync global state to mock
-    for key, value in _global_state.items():
-        mock_st._data[key] = value
-    
-    # Use existing structured_data_filters_display but capture results
-    from ares.app.filter_helpers import structured_data_filters_display
+    """Apply structured data filters."""
     
     # If filters provided, apply them directly
     if filters:
@@ -403,19 +369,13 @@ def apply_structured_filters(df: pd.DataFrame, filters: Optional[Dict[str, Any]]
 
 
 def get_embedding_filters(df: pd.DataFrame, structured_filtered_df: pd.DataFrame, embedding_selections: Optional[Dict[str, Any]] = None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Get embedding-based filters."""
-    # Setup mock Streamlit for compatibility
-    mock_st = _setup_streamlit_mock()
+    """Get embedding-based filters.
     
-    # Sync global state to mock
-    for key, value in _global_state.items():
-        mock_st._data[key] = value
-    
+    Note: Embedding filter display functions require Streamlit UI components.
+    For API use, this is a simplified version that only applies selections if provided.
+    """
     embedding_figs = {}
     embedding_filtered_dfs = []
-    
-    # Get filtered dataframes for each embedding
-    from ares.app.filter_helpers import create_embedding_data_filter_display
     
     for raw_data_key in META_INDEX_NAMES:
         if f"{raw_data_key}_reduced" not in _global_state:
@@ -423,22 +383,11 @@ def get_embedding_filters(df: pd.DataFrame, structured_filtered_df: pd.DataFrame
         
         # If embedding selections provided, use them
         if embedding_selections and raw_data_key in embedding_selections:
-            # Apply selection directly
             selected_ids = embedding_selections[raw_data_key].get("selected_ids", [])
-            filtered_df = df[df["id"].isin(selected_ids)]
-            embedding_filtered_dfs.append(filtered_df)
-            # Create a simple figure for the selection
-            embedding_figs[raw_data_key] = None  # Would need to create figure from selection
-        else:
-            # Use existing filter display logic
-            filtered_df, cluster_fig = create_embedding_data_filter_display(
-                df=df,
-                id_key="id",
-                raw_data_key=raw_data_key,
-                kept_ids=structured_filtered_df["id"].apply(str).tolist(),
-            )
-            embedding_filtered_dfs.append(filtered_df)
-            embedding_figs[raw_data_key] = cluster_fig
+            if selected_ids:
+                filtered_df = structured_filtered_df[structured_filtered_df["id"].isin(selected_ids)]
+                embedding_filtered_dfs.append(filtered_df)
+                embedding_figs[raw_data_key] = None  # Would need to create figure from selection
     
     # Combine all filtered dataframes (AND operation)
     if embedding_filtered_dfs:
@@ -455,18 +404,46 @@ def get_embedding_filters(df: pd.DataFrame, structured_filtered_df: pd.DataFrame
     return filtered_df, embedding_figs
 
 
-def get_data_distributions(filtered_df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """Get data distribution visualizations."""
+def get_data_distributions(
+    filtered_df: pd.DataFrame,
+    environment: str | None = None,
+    selected_axes: list[str] | None = None,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    """Get data distribution visualizations.
+    
+    Args:
+        filtered_df: DataFrame to visualize
+        environment: "Indoor" or "Outdoor" mode
+        selected_axes: List of axis names to show (e.g., ["Objects", "Lighting", "Materials"])
+        use_cache: If True, check cache first before generating on-demand
+    """
     try:
         print(f"[DEBUG] get_data_distributions: DataFrame shape: {filtered_df.shape}")
-        if filtered_df.empty:
-            print("[WARNING] DataFrame is empty, returning empty visualizations")
-            return []
+        print(f"[DEBUG] Environment: {environment}, Selected axes: {selected_axes}, use_cache: {use_cache}")
+        
+        # Check cache first if enabled
+        if use_cache:
+            cache_key = _get_cache_key(environment, selected_axes)
+            cache_storage_key = f"plot_cache_{cache_key}"
+            if cache_storage_key in _global_state:
+                cached_plots = _global_state[cache_storage_key]
+                print(f"[DEBUG] Returning {len(cached_plots)} cached visualizations for key: {cache_key}")
+                return cached_plots
+            else:
+                print(f"[DEBUG] No cached plots found for key: {cache_key}, generating on-demand")
+        
         if len(filtered_df.columns) == 0:
             print("[WARNING] DataFrame has no columns, returning empty visualizations")
             return []
         print(f"[DEBUG] DataFrame columns: {list(filtered_df.columns)[:10]}...")  # Show first 10 columns
-        visualizations = generate_automatic_visualizations(filtered_df)
+        # Always call generate_automatic_visualizations even if dataframe is empty
+        # so it can return empty plots for selected axes
+        visualizations = generate_automatic_visualizations(
+            filtered_df,
+            environment=environment,
+            selected_axes=selected_axes,
+        )
         print(f"[DEBUG] Generated {len(visualizations)} visualizations")
         
         # Convert Plotly figures to JSON-serializable format

@@ -160,17 +160,14 @@ class Environment(BaseConfig):
     weather_estimate: str = Field(
         description="Weather conditions in the environment",
         pattern=f"^(Clear Sky|Overcast|Snow Falling|Raining|Fog{PATTERN_EXTRA_CHOICES})$",
-        default=None,
     )
     outdoor_lighting_estimate: str = Field(
         description="Outdoor lighting conditions in the environment",
         pattern=f"^(Sunrise|Sunset|Twilight|Mid-morning|Afternoon|Zenith|Golden hour|Blue hour|Night{PATTERN_EXTRA_CHOICES})$",
-        default=None,
     )
     road_surface_estimate: str = Field(
         description="Road surface conditions in the environment",
         pattern=f"^(Dry road|Snow on ground|Sand on ground|Puddles{PATTERN_EXTRA_CHOICES})$",
-        default=None,
     )
 
     @model_validator(mode="before")
