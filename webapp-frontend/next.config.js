@@ -1,13 +1,18 @@
+const path = require('path')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  webpack: (config, { isServer }) => {
+  webpack: (config) => {
     // Fix for plotly.js memory issues
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        fs: false,
-      }
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+    }
+    // Explicitly set path aliases for webpack
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@': path.resolve(__dirname),
     }
     return config
   },
