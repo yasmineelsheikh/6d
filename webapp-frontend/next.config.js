@@ -15,7 +15,8 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8000/api/:path*',
+        // In production, proxy API requests to the FastAPI backend on Vercel
+        destination: 'https://6d-nu.vercel.app/api/:path*',
       },
     ]
   },
