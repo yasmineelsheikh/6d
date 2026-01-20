@@ -8,8 +8,20 @@ import bcrypt
 import os
 
 # Database setup
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./users.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# Use Supabase PostgreSQL if available, otherwise fall back to SQLite for local dev
+POSTGRES_URL = os.getenv("POSTGRES_URL_NON_POOLING") or os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
+
+if POSTGRES_URL and POSTGRES_URL.startswith("postgres"):
+    # Use Supabase PostgreSQL
+    DATABASE_URL = POSTGRES_URL
+    # PostgreSQL doesn't need check_same_thread
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
+else:
+    # Fallback to SQLite for local development
+    db_path = "./users.db"
+    DATABASE_URL = f"sqlite:///{db_path}"
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -24,10 +36,14 @@ class User(Base):
     hashed_password = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-Base.metadata.create_all(bind=engine)
+# Create tables if they don't exist
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"Warning: Could not create database tables at startup: {e}")
 
-# JWT settings
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+# JWT settings - use Supabase JWT secret if available, otherwise fall back to custom secret
+SECRET_KEY = os.getenv("SUPABASE_JWT_SECRET") or os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60  # 30 days
 
