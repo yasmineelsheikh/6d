@@ -25,6 +25,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import requests
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 load_dotenv()
 
@@ -377,7 +378,23 @@ POD_API_URL = "https://g6hxoyusgab5l4-8000.proxy.runpod.net/run-json"
 S3_BUCKET = "6d-temp-storage"
 S3_REGION = "us-west-2"
 s3 = boto3.client("s3", region_name=S3_REGION)
-tmp_dump_dir = os.path.join(os.path.expanduser("~"), ".ares_webapp_tmp")
+
+# Initialize Supabase client
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+supabase: Optional[Client] = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("Supabase client initialized")
+else:
+    print("Warning: Supabase credentials not found, storage operations will use S3/local filesystem")
+
+# Use /tmp on Vercel/serverless, otherwise use home directory for local dev
+if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
+    tmp_dump_dir = "/tmp/ares_webapp_tmp"
+else:
+    tmp_dump_dir = os.path.join(os.path.expanduser("~"), ".ares_webapp_tmp")
+
 os.makedirs(tmp_dump_dir, exist_ok=True)
 
 # Store dataset paths in memory (dataset_name -> dataset_path)
@@ -410,6 +427,44 @@ class DatasetInfo(BaseModel):
     dataset_name: str
 
 # Helper functions
+def upload_file_to_supabase(file_path: str, file_content: bytes, bucket: str = "datasets") -> str:
+    """Upload a file to Supabase Storage."""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized")
+    
+    try:
+        # Upload file to Supabase Storage
+        response = supabase.storage.from_(bucket).upload(
+            path=file_path,
+            file=file_content,
+            file_options={"content-type": "application/octet-stream", "upsert": "true"}
+        )
+        return file_path
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error uploading to Supabase Storage: {str(e)}")
+
+def download_file_from_supabase(file_path: str, bucket: str = "datasets") -> bytes:
+    """Download a file from Supabase Storage."""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized")
+    
+    try:
+        response = supabase.storage.from_(bucket).download(file_path)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading from Supabase Storage: {str(e)}")
+
+def list_files_in_supabase(folder_path: str, bucket: str = "datasets") -> List[Dict[str, Any]]:
+    """List all files in a Supabase Storage folder."""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized")
+    
+    try:
+        response = supabase.storage.from_(bucket).list(folder_path)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing files in Supabase Storage: {str(e)}")
+
 def upload_folder_to_s3(local_folder_path: str, bucket_name: str, s3_prefix: str = "") -> None:
     """Upload all files in a folder to S3."""
     for root, dirs, files in os.walk(local_folder_path):
@@ -734,14 +789,24 @@ async def upload_dataset(
                 detail="No files were uploaded. Please select a folder to upload."
             )
         
-        # Create temporary directory for uploaded dataset
-        upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Upload directory: {upload_dir}")
+        # Use Supabase Storage if available, otherwise fall back to local filesystem
+        use_supabase = supabase is not None
+        upload_dir = None
+        
+        if not use_supabase:
+            # Fallback to local filesystem
+            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
+                upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
+            else:
+                upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Using local filesystem, upload directory: {upload_dir}")
+        else:
+            print(f"Using Supabase Storage for dataset: {dataset_name}")
         
         # Detect root folder name from first file's path
         # webkitRelativePath includes the root folder name (e.g., "my_dataset/data/file.parquet")
-        # We need to strip it so files are saved directly under upload_dir
+        # We need to strip it so files are saved directly under dataset_name
         root_folder_prefix = None
         first_file_path = None
         for file in files:
@@ -773,16 +838,23 @@ async def upload_dataset(
                     file_path = file_path[len(root_folder_prefix) + 1:]
                     print(f"Stripped root folder prefix, new path: {file_path}")
                 
-                # Create full path
-                full_path = upload_dir / file_path
-                full_path.parent.mkdir(parents=True, exist_ok=True)
+                # Read file content
+                content = await file.read()
                 
-                # Write file
-                with open(full_path, "wb") as f:
-                    content = await file.read()
-                    f.write(content)
+                if use_supabase:
+                    # Upload to Supabase Storage
+                    supabase_path = f"{dataset_name}/{file_path}"
+                    upload_file_to_supabase(supabase_path, content, bucket="datasets")
+                    print(f"Uploaded to Supabase Storage: {supabase_path}")
+                else:
+                    # Save to local filesystem
+                    full_path = upload_dir / file_path
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(full_path, "wb") as f:
+                        f.write(content)
+                    print(f"Saved file: {full_path}")
+                
                 files_saved += 1
-                print(f"Saved file: {full_path}")
             except Exception as file_error:
                 import traceback
                 error_trace = traceback.format_exc()
@@ -1057,11 +1129,23 @@ async def run_augmentation(request: AugmentationRequest):
         
         print(f"Generated {len(variations)} prompt variations")
         
-        # Create directory for saving prompt variations
+        # Create directory path for saving prompt variations
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
-        prompts_dir = project_root / "data" / "prompts" / request.dataset_name / f"{timestamp}_{unique_id}"
-        prompts_dir.mkdir(parents=True, exist_ok=True)
+        prompt_folder_name = f"{timestamp}_{unique_id}"
+        prompts_base_path = f"prompts/{request.dataset_name}/{prompt_folder_name}"
+        
+        # Use Supabase Storage if available, otherwise fall back to local filesystem
+        use_supabase = supabase is not None
+        prompts_dir = None
+        
+        if not use_supabase:
+            # Fallback to local filesystem
+            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
+                prompts_dir = Path("/tmp") / "prompts" / request.dataset_name / prompt_folder_name
+            else:
+                prompts_dir = project_root / "data" / "prompts" / request.dataset_name / prompt_folder_name
+            prompts_dir.mkdir(parents=True, exist_ok=True)
         
         # Get list of video files in sorted order (same order as descriptions were generated)
         video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
@@ -1075,10 +1159,21 @@ async def run_augmentation(request: AugmentationRequest):
         metadata = []
         for idx, (axis_changed, variation_text) in enumerate(variations):
             filename = f"variation_{idx+1:04d}.txt"
-            file_path = prompts_dir / filename
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(variation_text)
-            saved_files.append(str(file_path.relative_to(project_root)))
+            
+            if use_supabase:
+                # Upload to Supabase Storage
+                supabase_file_path = f"{prompts_base_path}/{filename}"
+                upload_file_to_supabase(supabase_file_path, variation_text.encode('utf-8'), bucket="datasets")
+                saved_files.append(supabase_file_path)
+                txt_file_path = supabase_file_path
+                print(f"Uploaded variation {idx+1} to Supabase: {supabase_file_path}")
+            else:
+                # Save to local filesystem
+                file_path = prompts_dir / filename
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(variation_text)
+                saved_files.append(str(file_path.relative_to(project_root)))
+                txt_file_path = f"prompts/{request.dataset_name}/{prompt_folder_name}/{filename}"
             
             # Get corresponding video path (same index as description)
             if idx < len(video_files):
@@ -1092,21 +1187,27 @@ async def run_augmentation(request: AugmentationRequest):
             
             metadata.append({
                 "video_path": str(video_relative_path),
-                "txt_file_path": f"prompts/{timestamp}_{unique_id}/{filename}",
+                "txt_file_path": txt_file_path,
                 "axis": axis_changed
             })
-            print(f"Saved variation {idx+1} to {file_path} (video: {video_relative_path}, axis: {axis_changed})")
+            print(f"Saved variation {idx+1} (video: {video_relative_path}, axis: {axis_changed})")
         
         # Save metadata JSON file
-        metadata_file = prompts_dir / "metadata.json"
-        with open(metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2)
-        print(f"Saved metadata to {metadata_file}")
-        
-        # Upload entire folder to S3
-        s3_prefix = f"input_data/{request.dataset_name}/prompts/{timestamp}_{unique_id}"
-        print(f"Uploading prompt variations folder to S3: {s3_prefix}")
-        upload_folder_to_s3(str(prompts_dir), S3_BUCKET, s3_prefix)
+        if use_supabase:
+            metadata_file_path = f"{prompts_base_path}/metadata.json"
+            metadata_json = json.dumps(metadata, indent=2)
+            upload_file_to_supabase(metadata_file_path, metadata_json.encode('utf-8'), bucket="datasets")
+            print(f"Uploaded metadata to Supabase: {metadata_file_path}")
+        else:
+            metadata_file = prompts_dir / "metadata.json"
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+            print(f"Saved metadata to {metadata_file}")
+            
+            # Upload entire folder to S3 (only if not using Supabase)
+            s3_prefix = f"input_data/{request.dataset_name}/prompts/{timestamp}_{unique_id}"
+            print(f"Uploading prompt variations folder to S3: {s3_prefix}")
+            upload_folder_to_s3(str(prompts_dir), S3_BUCKET, s3_prefix)
         
         return {
             "success": True,
