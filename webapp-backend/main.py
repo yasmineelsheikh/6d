@@ -28,10 +28,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Add project root to path for scripts import
+# Add project root and src/ to path so we can import the ares package
 project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+src_dir = project_root / "src"
+
+for path in (project_root, src_dir):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
 
 # Import auth utilities
 from auth import (
