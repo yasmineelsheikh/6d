@@ -11,13 +11,22 @@ import os
 # Use Supabase PostgreSQL if available, otherwise fall back to SQLite for local dev
 POSTGRES_URL = os.getenv("POSTGRES_URL_NON_POOLING") or os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
 
-if POSTGRES_URL and POSTGRES_URL.startswith("postgres"):
+# Check if we're on Vercel (should always use PostgreSQL there)
+is_vercel = os.getenv("VERCEL") == "1"
+
+if POSTGRES_URL and (POSTGRES_URL.startswith("postgres") or is_vercel):
     # Use Supabase PostgreSQL
+    if not POSTGRES_URL.startswith("postgres"):
+        # If on Vercel but POSTGRES_URL not found, raise an error
+        raise ValueError(
+            "PostgreSQL connection string required on Vercel. "
+            "Please set POSTGRES_URL_NON_POOLING or POSTGRES_URL environment variable."
+        )
     DATABASE_URL = POSTGRES_URL
     # PostgreSQL doesn't need check_same_thread
     engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
 else:
-    # Fallback to SQLite for local development
+    # Fallback to SQLite for local development only
     db_path = "./users.db"
     DATABASE_URL = f"sqlite:///{db_path}"
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
