@@ -22,7 +22,8 @@ if POSTGRES_URL and (POSTGRES_URL.startswith("postgres") or is_vercel):
             "PostgreSQL connection string required on Vercel. "
             "Please set POSTGRES_URL_NON_POOLING or POSTGRES_URL environment variable."
         )
-    DATABASE_URL = POSTGRES_URL
+    # Normalize connection string: SQLAlchemy prefers postgresql:// over postgres://
+    DATABASE_URL = POSTGRES_URL.replace("postgres://", "postgresql://", 1)
     # PostgreSQL doesn't need check_same_thread
     engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
 else:
