@@ -2,7 +2,16 @@
   command = "npm run build"
   publish = ".next"
 
+[build.environment]
+  NODE_VERSION = "20"
+
+# Use Netlify Next.js plugin for better Next.js support
+# This plugin handles Next.js routing, ISR, and other Next.js features automatically
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
 # Proxy API requests to Vercel backend
+# This must come AFTER the plugin so it doesn't interfere with Next.js routing
 [[redirects]]
   from = "/api/*"
   to = "https://6d-nu.vercel.app/api/:splat"
