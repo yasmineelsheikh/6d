@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Loader2, Filter, BarChart3, Download, Table } from 'lucide-react'
-import { cn } from '../../lib/utils'
+import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 
 // Dynamically import Plotly to avoid SSR issues

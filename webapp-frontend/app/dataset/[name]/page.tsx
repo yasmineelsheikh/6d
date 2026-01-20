@@ -15,7 +15,7 @@ import SettingsModal, { SettingsData } from '@/components/SettingsModal'
 import LoginModal from '@/components/LoginModal'
 import RegisterModal from '@/components/RegisterModal'
 import { useAuth } from '@/contexts/AuthContext'
-import { cn } from '../../../lib/utils'
+import { cn } from '@/lib/utils'
 
 interface DatasetInfo {
   dataset_name: string
