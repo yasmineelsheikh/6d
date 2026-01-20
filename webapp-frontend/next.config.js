@@ -12,10 +12,10 @@ const nextConfig = {
       }
     }
     // Ensure path aliases work correctly
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      '@': path.resolve(__dirname),
+    if (!config.resolve.alias) {
+      config.resolve.alias = {}
     }
+    config.resolve.alias['@'] = path.resolve(__dirname)
     return config
   },
   async rewrites() {
