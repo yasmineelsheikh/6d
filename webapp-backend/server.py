@@ -1,6 +1,6 @@
 #server.py file used by gpu
 
-from fastapi import FastAPI, HTTPException
+"""from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
 import tempfile
@@ -325,4 +325,4 @@ def run_cosmos_from_prompts(req: CosmosRequest):
             return {"s3_url": output_urls[0] if len(output_urls) == 1 else output_urls}
            
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error processing Cosmos inference: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error processing Cosmos inference: {str(e)}") """
