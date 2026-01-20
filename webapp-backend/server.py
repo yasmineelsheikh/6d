@@ -15,7 +15,7 @@ import sys
 
 # Add parent directory to path to import generate_prompt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from generate_prompt import generate_prompt_variation
+from generate_prompt import generate_prompt_variations
 
 S3_BUCKET = "6d-temp-storage"
 S3_REGION = "us-west-2"
