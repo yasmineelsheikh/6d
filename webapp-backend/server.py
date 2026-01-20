@@ -15,7 +15,7 @@ import sys
 
 # Add parent directory to path to import generate_prompt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from generate_prompt import generate_prompt_variations
+
 
 S3_BUCKET = "6d-temp-storage"
 S3_REGION = "us-west-2"
@@ -167,10 +167,7 @@ def download_folder_from_s3(s3_prefix: str, local_path: str) -> None:
 
 @app.post("/run-json-from-prompts")
 def run_cosmos_from_prompts(req: CosmosRequest):
-    """
-    Similar to run_cosmos but iterates through already generated prompts in the prompts folder
-    instead of generating new prompts in each iteration.
-    """
+
     dataset_name = req.dataset_name
     s3_prefix = f"input_data/{dataset_name}"
     # Create temporary directory for downloaded files
