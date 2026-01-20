@@ -1,5 +1,3 @@
-const path = require('path')
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -11,11 +9,6 @@ const nextConfig = {
         fs: false,
       }
     }
-    // Ensure path aliases work correctly
-    if (!config.resolve.alias) {
-      config.resolve.alias = {}
-    }
-    config.resolve.alias['@'] = path.resolve(__dirname)
     return config
   },
   async rewrites() {
