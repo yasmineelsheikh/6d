@@ -36,19 +36,18 @@ project_root = current_dir.parent  # demo/ares-platform/
 src_in_parent = project_root / "src"  # demo/ares-platform/src/
 
 # Prefer src in current directory (webapp-backend/src/) for Railway deployments
+# IMPORTANT: Add the src directory itself to sys.path so 'ares' can be imported directly
 if src_in_current.exists() and src_in_current.is_dir():
-    if str(current_dir) not in sys.path:
-        sys.path.insert(0, str(current_dir))
+    if str(src_in_current) not in sys.path:
+        sys.path.insert(0, str(src_in_current))
     print(f"Using src from current directory: {src_in_current}")
 elif src_in_parent.exists() and src_in_parent.is_dir():
     # Fallback: src in parent directory (full repo structure)
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
     if str(src_in_parent) not in sys.path:
         sys.path.insert(0, str(src_in_parent))
     print(f"Using src from parent directory: {src_in_parent}")
 else:
-    # Last resort: try project_root
+    # Last resort: try project_root (which should contain src/)
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
     print(f"Using project_root: {project_root}")
@@ -628,9 +627,10 @@ def run_ingestion_for_dataset(dataset_name: str, dataset_path: str, task: str = 
     
     try:
         # Import necessary modules
-        from src.ares.databases.structured_database import ROBOT_DB_PATH, RolloutSQLModel, setup_database
-        from src.ares.models.shortcuts import get_nomic_embedder
-        from src.ares.utils.image_utils import split_video_to_frames
+        # Note: src/ is already in sys.path, so we import 'ares' directly (not 'src.ares')
+        from ares.databases.structured_database import ROBOT_DB_PATH, RolloutSQLModel, setup_database
+        from ares.models.shortcuts import get_nomic_embedder
+        from ares.utils.image_utils import split_video_to_frames
         from sqlalchemy import text
 
         # Dynamically import run_ingestion_pipeline from the project root main.py
