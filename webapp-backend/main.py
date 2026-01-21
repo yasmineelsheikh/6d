@@ -363,9 +363,12 @@ async def clear_database():
         raise HTTPException(status_code=500, detail=f"Error clearing database: {str(e)}")
 
 # CORS middleware - allow all origins for development
+frontend_origins = [
+    "https://6d-8jlk-c8jsdm3sn-yasmines-projects-3b23a4db.vercel.app/"
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=frontend_origins,  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
