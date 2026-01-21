@@ -44,6 +44,19 @@ from auth import (
 )
 
 app = FastAPI(title="Ares Platform API", version="1.0.0")
+# CORS middleware - allow all origins for development
+frontend_origins = [
+    "https://6d-8jlk-git-main-yasmines-projects-3b23a4db.vercel.app/",
+    "https://6d-8jlk.vercel.app/",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=frontend_origins,  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 # Security
 security = HTTPBearer()
@@ -363,18 +376,18 @@ async def clear_database():
         raise HTTPException(status_code=500, detail=f"Error clearing database: {str(e)}")
 
 # CORS middleware - allow all origins for development
-frontend_origins = [
-    "https://6d-8jlk-git-main-yasmines-projects-3b23a4db.vercel.app/",
-    "https://6d-8jlk.vercel.app/",
-]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=frontend_origins,  # Allow all origins for development
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+#frontend_origins = [
+#    "https://6d-8jlk-git-main-yasmines-projects-3b23a4db.vercel.app/",
+#    "https://6d-8jlk.vercel.app/",
+#]
+#app.add_middleware(
+#    CORSMiddleware,
+#    allow_origins=frontend_origins,  # Allow all origins for development
+#    allow_credentials=True,
+#    allow_methods=["*"],
+#    allow_headers=["*"],
+#    expose_headers=["*"],
+#)
 
 # Configuration
 POD_API_URL = "https://g6hxoyusgab5l4-8000.proxy.runpod.net/run-json"
