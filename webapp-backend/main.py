@@ -37,18 +37,18 @@ src_in_parent = project_root / "src"  # demo/ares-platform/src/
 
 # Prefer src in current directory (webapp-backend/src/) for Railway deployments
 if src_in_current.exists() and src_in_current.is_dir():
-    if str(current_dir) not in sys.path:
-        sys.path.insert(0, str(current_dir))
+    # Add src directory itself to path so 'ares' can be imported directly
+    if str(src_in_current) not in sys.path:
+        sys.path.insert(0, str(src_in_current))
     print(f"Using src from current directory: {src_in_current}")
 elif src_in_parent.exists() and src_in_parent.is_dir():
     # Fallback: src in parent directory (full repo structure)
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
+    # Add src directory itself to path so 'ares' can be imported directly
     if str(src_in_parent) not in sys.path:
         sys.path.insert(0, str(src_in_parent))
     print(f"Using src from parent directory: {src_in_parent}")
 else:
-    # Last resort: try project_root
+    # Last resort: try project_root (which should contain src/)
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
     print(f"Using project_root: {project_root}")
