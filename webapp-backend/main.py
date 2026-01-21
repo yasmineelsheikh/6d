@@ -385,8 +385,10 @@ s3 = boto3.client("s3", region_name=S3_REGION)
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "datasets")
+# Convenience flag: whether Supabase Storage is usable
+SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+if not SUPABASE_ENABLED:
     print(
         "Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set. "
         "Supabase Storage operations will not be available."
@@ -854,7 +856,7 @@ async def upload_dataset(
             )
         
         # Use Supabase Storage if available, otherwise fall back to local filesystem
-        use_supabase = supabase is not None
+        use_supabase = SUPABASE_ENABLED
         upload_dir = None
         
         if not use_supabase:
