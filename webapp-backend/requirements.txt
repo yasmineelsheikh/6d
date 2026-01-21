@@ -16,5 +16,7 @@ email-validator
 tqdm
 click
 numpy
-torch --index-url https://download.pytorch.org/whl/cpu
-#torch
+# CPU-only PyTorch (much smaller, ~500MB vs ~2-3GB)
+# Use -f (find-links) to specify CPU wheel repository
+-f https://download.pytorch.org/whl/cpu
+torch==2.1.0+cpu
