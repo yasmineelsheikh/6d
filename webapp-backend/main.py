@@ -25,7 +25,6 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import requests
 from dotenv import load_dotenv
-from supabase import create_client, Client
 
 load_dotenv()
 
@@ -379,15 +378,19 @@ S3_BUCKET = "6d-temp-storage"
 S3_REGION = "us-west-2"
 s3 = boto3.client("s3", region_name=S3_REGION)
 
-# Initialize Supabase client
+# Supabase Storage configuration (for datasets and prompts).
+# We talk directly to the Supabase Storage REST API using requests,
+# instead of relying on the supabase-py client (which can be brittle
+# in serverless environments).
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-supabase: Optional[Client] = None
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("Supabase client initialized")
-else:
-    print("Warning: Supabase credentials not found, storage operations will use S3/local filesystem")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "datasets")
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    print(
+        "Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set. "
+        "Supabase Storage operations will not be available."
+    )
 
 # Use /tmp on Vercel/serverless, otherwise use home directory for local dev
 if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
@@ -427,43 +430,104 @@ class DatasetInfo(BaseModel):
     dataset_name: str
 
 # Helper functions
-def upload_file_to_supabase(file_path: str, file_content: bytes, bucket: str = "datasets") -> str:
-    """Upload a file to Supabase Storage."""
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase client not initialized")
-    
-    try:
-        # Upload file to Supabase Storage
-        response = supabase.storage.from_(bucket).upload(
-            path=file_path,
-            file=file_content,
-            file_options={"content-type": "application/octet-stream", "upsert": "true"}
+def _ensure_supabase_storage_config() -> None:
+    """Validate that Supabase Storage is configured."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Supabase Storage is not configured. "
+                   "Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
         )
-        return file_path
+
+
+def upload_file_to_supabase(file_path: str, file_content: bytes, bucket: str = "datasets") -> str:
+    """Upload a file to Supabase Storage via REST API."""
+    _ensure_supabase_storage_config()
+
+    bucket_name = bucket or SUPABASE_STORAGE_BUCKET
+    base_url = SUPABASE_URL.rstrip("/")
+    # Ensure no leading slash in file_path
+    object_path = file_path.lstrip("/")
+    url = f"{base_url}/storage/v1/object/{bucket_name}/{object_path}"
+
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/octet-stream",
+    }
+    params = {"upsert": "true"}
+
+    try:
+        resp = requests.post(url, params=params, data=file_content, headers=headers, timeout=60)
+        if not resp.ok:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Supabase Storage upload failed ({resp.status_code}): {resp.text}",
+            )
+        return object_path
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error uploading to Supabase Storage: {str(e)}")
 
+
 def download_file_from_supabase(file_path: str, bucket: str = "datasets") -> bytes:
-    """Download a file from Supabase Storage."""
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase client not initialized")
-    
+    """Download a file from Supabase Storage via REST API."""
+    _ensure_supabase_storage_config()
+
+    bucket_name = bucket or SUPABASE_STORAGE_BUCKET
+    base_url = SUPABASE_URL.rstrip("/")
+    object_path = file_path.lstrip("/")
+    url = f"{base_url}/storage/v1/object/{bucket_name}/{object_path}"
+
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    }
+
     try:
-        response = supabase.storage.from_(bucket).download(file_path)
-        return response
+        resp = requests.get(url, headers=headers, timeout=60)
+        if not resp.ok:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Supabase Storage download failed ({resp.status_code}): {resp.text}",
+            )
+        return resp.content
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error downloading from Supabase Storage: {str(e)}")
 
+
 def list_files_in_supabase(folder_path: str, bucket: str = "datasets") -> List[Dict[str, Any]]:
-    """List all files in a Supabase Storage folder."""
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase client not initialized")
-    
+    """List all files in a Supabase Storage folder via REST API."""
+    _ensure_supabase_storage_config()
+
+    bucket_name = bucket or SUPABASE_STORAGE_BUCKET
+    base_url = SUPABASE_URL.rstrip("/")
+    url = f"{base_url}/storage/v1/object/list/{bucket_name}"
+
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+    }
+    # Supabase Storage list endpoint expects a JSON body
+    body = {
+        "prefix": folder_path.rstrip("/") if folder_path else "",
+        "limit": 1000,
+    }
+
     try:
-        response = supabase.storage.from_(bucket).list(folder_path)
-        return response
+        resp = requests.post(url, json=body, headers=headers, timeout=60)
+        if not resp.ok:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Supabase Storage list failed ({resp.status_code}): {resp.text}",
+            )
+        return resp.json()
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error listing files in Supabase Storage: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error listing Supabase Storage files: {str(e)}")
+
 
 def upload_folder_to_s3(local_folder_path: str, bucket_name: str, s3_prefix: str = "") -> None:
     """Upload all files in a folder to S3."""
