@@ -20,3 +20,4 @@ numpy
 # Use -f (find-links) to specify CPU wheel repository - must come before torch
 -f https://download.pytorch.org/whl/cpu
 torch==2.1.0
+#torch
