@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Upload, Loader2, CheckCircle2 } from 'lucide-react'
 
-const API_BASE = 'https://6d-nu.vercel.app'
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''
 
 interface DatasetUploadProps {
   onDatasetLoaded: (datasetName: string) => void

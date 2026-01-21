@@ -17,7 +17,7 @@ import RegisterModal from '@/components/RegisterModal'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 
-const API_BASE = 'https://6d-nu.vercel.app'
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''
 
 interface DatasetInfo {
   dataset_name: string

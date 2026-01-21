@@ -18,7 +18,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 
-const API_BASE = 'https://6d-nu.vercel.app'
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''
 
 // Dynamically import Plotly to avoid SSR issues
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false })
