@@ -11,3 +11,6 @@ python-jose[cryptography]
 bcrypt
 python-multipart
 email-validator
+tqdm
+click
+numpy
