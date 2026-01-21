@@ -1,0 +1,11 @@
+{
+    "input": {
+        "video_path": "/path/to/video.mp4",
+        "prompt_path": "/path/to/prompt.txt",
+        "output_path": "/path/to/output/",  
+            "name": "job_name",
+            "guidance": 3,
+            "edge": {"control_weight": 0.5},
+            "vis": {"control_weight": 0.2}
+        }  
+    }

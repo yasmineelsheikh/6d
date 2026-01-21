@@ -29,13 +29,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Add project root and src/ to path so we can import the ares package
-project_root = Path(__file__).parent.parent
-src_dir = project_root / "src"
+# Railway root is webapp-backend, so check multiple locations for src/
+current_dir = Path(__file__).parent  # webapp-backend/
+src_in_current = current_dir / "src"  # webapp-backend/src/ (copied for Railway)
+project_root = current_dir.parent  # demo/ares-platform/
+src_in_parent = project_root / "src"  # demo/ares-platform/src/
 
-for path in (project_root, src_dir):
-    path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
+# Prefer src in current directory (webapp-backend/src/) for Railway deployments
+if src_in_current.exists() and src_in_current.is_dir():
+    if str(current_dir) not in sys.path:
+        sys.path.insert(0, str(current_dir))
+    print(f"Using src from current directory: {src_in_current}")
+elif src_in_parent.exists() and src_in_parent.is_dir():
+    # Fallback: src in parent directory (full repo structure)
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    if str(src_in_parent) not in sys.path:
+        sys.path.insert(0, str(src_in_parent))
+    print(f"Using src from parent directory: {src_in_parent}")
+else:
+    # Last resort: try project_root
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    print(f"Using project_root: {project_root}")
 
 # Import auth utilities
 from auth import (
