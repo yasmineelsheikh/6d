@@ -11,5 +11,3 @@ python-jose[cryptography]
 bcrypt
 python-multipart
 email-validator
-supabase==2.3.4
-
