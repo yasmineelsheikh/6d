@@ -859,20 +859,19 @@ async def upload_dataset(
                 detail="No files were uploaded. Please select a folder to upload."
             )
         
-        # Use Supabase Storage if available, otherwise fall back to local filesystem.
+        # Use Supabase Storage if available, but always keep a local copy on disk
+        # so downstream ingestion logic can operate on a filesystem path.
         use_supabase = SUPABASE_ENABLED
-        upload_dir = None
         
-        if not use_supabase:
-            # Fallback to local filesystem
-            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-                upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
-            else:
-                upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Using local filesystem, upload directory: {upload_dir}")
+        # Local upload directory (always created)
+        if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
+            upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
         else:
-            print(f"Using Supabase Storage for dataset: {dataset_name}")
+            upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Using local upload directory: {upload_dir}")
+        if use_supabase:
+            print(f"Also uploading to Supabase Storage for dataset: {dataset_name}")
         
         # Detect root folder name from first file's path
         # webkitRelativePath includes the root folder name (e.g., "my_dataset/data/file.parquet")
