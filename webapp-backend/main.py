@@ -965,8 +965,26 @@ async def upload_dataset(
             )
         
         # Run basic ingestion (no database creation)
-        if str(project_root) not in sys.path:
+        # Find scripts/ folder - check multiple locations
+        current_dir = Path(__file__).parent  # webapp-backend/
+        scripts_in_current = current_dir / "scripts"  # webapp-backend/scripts/ (copied for Railway)
+        scripts_parent = current_dir.parent  # demo/ares-platform/
+        scripts_in_parent = scripts_parent / "scripts"  # demo/ares-platform/scripts/
+        
+        # Prefer scripts in current directory (webapp-backend/scripts/) for Railway deployments
+        if scripts_in_current.exists() and scripts_in_current.is_dir():
+            if str(current_dir) not in sys.path:
+                sys.path.insert(0, str(current_dir))
+                print(f"Using scripts from current directory: {scripts_in_current}")
+        elif scripts_in_parent.exists() and scripts_in_parent.is_dir():
+            # Fallback: scripts in parent directory (full repo structure)
+            if str(scripts_parent) not in sys.path:
+                sys.path.insert(0, str(scripts_parent))
+                print(f"Using scripts from parent directory: {scripts_in_parent}")
+        elif str(project_root) not in sys.path:
+            # Last resort: try project_root
             sys.path.insert(0, str(project_root))
+            print(f"Using project_root: {project_root}")
         
         from scripts.ingest_lerobot_dataset import ingest_dataset
         count = ingest_dataset(str(upload_dir), None, dataset_name)
