@@ -94,6 +94,11 @@ export default function Home() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
   const [tasks, setTasks] = useState<TaskData[]>([])
+
+  // Debug: verify API base URL at runtime
+  useEffect(() => {
+    console.log('API_BASE at runtime:', API_BASE)
+  }, [])
   
   const handleLoadDataset = async () => {
     if (uploadMode === 'local' && !uploadedFiles) return
