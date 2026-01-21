@@ -167,6 +167,15 @@ export default function Home() {
         } catch (e) {
           errorMessage = `Server error: ${response.status} ${response.statusText}`
         }
+
+        // Log full error context so we can see what's going wrong in production
+        console.error('Upload error', {
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
+          message: errorMessage,
+        })
+
         throw new Error(errorMessage)
       }
 
