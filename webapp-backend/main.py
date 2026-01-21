@@ -47,7 +47,7 @@ app = FastAPI(title="Ares Platform API", version="1.0.0")
 # CORS middleware - allow all origins for development
 frontend_origins = [
     "https://6d-8jlk-git-main-yasmines-projects-3b23a4db.vercel.app",
-    "https://6d-8jlk.vercel.app",
+    "6d-8jlk.vercel.app/",
 ]
 app.add_middleware(
     CORSMiddleware,
