@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Play, Loader2, CheckCircle2 } from 'lucide-react'
 
+const API_BASE = 'https://6d-nu.vercel.app'
+
 interface AugmentationPanelProps {
   datasetName: string
   onComplete: (datasetName: string) => void
@@ -20,7 +22,7 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
     setS3Url(null)
 
     try {
-      const response = await fetch('/api/augmentation/run', {
+      const response = await fetch(`${API_BASE}/api/augmentation/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

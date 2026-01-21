@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Play, Loader2, CheckCircle2 } from 'lucide-react'
 
+const API_BASE = 'https://6d-nu.vercel.app'
+
 interface OptimizationPanelProps {
   datasetName: string
   onComplete?: (datasetName: string) => void
@@ -19,7 +21,7 @@ export default function OptimizationPanel({ datasetName, onComplete }: Optimizat
     setResult(null)
 
     try {
-      const response = await fetch('/api/optimization/run', {
+      const response = await fetch(`${API_BASE}/api/optimization/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

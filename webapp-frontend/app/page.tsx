@@ -18,6 +18,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 import dynamic from 'next/dynamic'
 
+const API_BASE = 'https://6d-nu.vercel.app'
+
 // Dynamically import Plotly to avoid SSR issues
 const Plot = dynamic(() => import('react-plotly.js'), { ssr: false })
 
@@ -134,13 +136,13 @@ export default function Home() {
         formData.append('environment', environment || '')
         formData.append('axes', JSON.stringify(selectedAxes.length > 0 ? selectedAxes : []))
 
-        response = await fetch('/api/datasets/upload', {
+        response = await fetch(`${API_BASE}/api/datasets/upload`, {
           method: 'POST',
           body: formData,
         })
       } else {
         // S3 path
-        response = await fetch('/api/datasets/load', {
+        response = await fetch(`${API_BASE}/api/datasets/load`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -376,7 +378,7 @@ export default function Home() {
     
     // Optionally send to backend
     try {
-      await fetch('/api/tasks', {
+      await fetch(`${API_BASE}/api/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newTask),
@@ -392,7 +394,7 @@ export default function Home() {
     // Settings are already saved to localStorage in the modal
     // Optionally send to backend
     try {
-      await fetch('/api/settings', {
+      await fetch(`${API_BASE}/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settingsData),
@@ -474,7 +476,7 @@ export default function Home() {
         onAddTask={async () => {
           try {
             // Clear the database and initialize components when starting a new task
-            const response = await fetch('/api/database/clear', {
+            const response = await fetch(`${API_BASE}/api/database/clear`, {
               method: 'POST',
             })
             if (!response.ok) {

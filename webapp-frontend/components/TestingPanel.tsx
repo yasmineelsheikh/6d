@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Play, Loader2, CheckCircle2 } from 'lucide-react'
 
+const API_BASE = 'https://6d-nu.vercel.app'
+
 interface TestingPanelProps {
   datasetName: string
 }
@@ -24,7 +26,7 @@ export default function TestingPanel({ datasetName }: TestingPanelProps) {
     setError(null)
 
     try {
-      const response = await fetch('/api/testing/upload', {
+      const response = await fetch(`${API_BASE}/api/testing/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
