@@ -453,7 +453,9 @@ def upload_file_to_supabase(file_path: str, file_content: bytes, bucket: str = "
     url = f"{base_url}/storage/v1/object/{bucket_name}/{object_path}"
 
     headers = {
+        # Supabase Storage requires both Authorization and apikey headers
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Content-Type": "application/octet-stream",
     }
     params = {"upsert": "true"}
@@ -483,6 +485,7 @@ def download_file_from_supabase(file_path: str, bucket: str = "datasets") -> byt
 
     headers = {
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
     }
 
     try:
@@ -509,6 +512,7 @@ def list_files_in_supabase(folder_path: str, bucket: str = "datasets") -> List[D
 
     headers = {
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Content-Type": "application/json",
     }
     # Supabase Storage list endpoint expects a JSON body
@@ -855,7 +859,7 @@ async def upload_dataset(
                 detail="No files were uploaded. Please select a folder to upload."
             )
         
-        # Use Supabase Storage if available, otherwise fall back to local filesystem
+        # Use Supabase Storage if available, otherwise fall back to local filesystem.
         use_supabase = SUPABASE_ENABLED
         upload_dir = None
         
