@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Upload, Loader2, CheckCircle2 } from 'lucide-react'
 
+const API_BASE = 'https://6d-nu.vercel.app'
+
 interface DatasetUploadProps {
   onDatasetLoaded: (datasetName: string) => void
 }
@@ -20,7 +22,7 @@ export default function DatasetUpload({ onDatasetLoaded }: DatasetUploadProps) {
     setSuccess(false)
 
     try {
-      const response = await fetch('/api/datasets/load', {
+      const response = await fetch(`${API_BASE}/api/datasets/load`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

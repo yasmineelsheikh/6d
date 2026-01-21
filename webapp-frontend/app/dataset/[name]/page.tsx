@@ -17,6 +17,8 @@ import RegisterModal from '@/components/RegisterModal'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 
+const API_BASE = 'https://6d-nu.vercel.app'
+
 interface DatasetInfo {
   dataset_name: string
   total_episodes: number
@@ -124,7 +126,7 @@ export default function DatasetPage() {
 
   const handleSaveTask = async (task: TaskData) => {
     try {
-      const response = await fetch('/api/tasks', {
+      const response = await fetch(`${API_BASE}/api/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(task),
@@ -140,7 +142,7 @@ export default function DatasetPage() {
 
   const handleSaveSettings = async (settings: SettingsData) => {
     try {
-      const response = await fetch('/api/settings', {
+      const response = await fetch(`${API_BASE}/api/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
