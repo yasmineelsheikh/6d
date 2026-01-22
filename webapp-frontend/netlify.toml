@@ -15,10 +15,10 @@
   command = "npm run dev"
   port = 3000
 
-# Proxy API requests to Vercel backend
+# Proxy API requests to Railway backend
 # This must come AFTER the plugin so it doesn't interfere with Next.js routing
 [[redirects]]
   from = "/api/*"
-  to = "https://6d-nu.vercel.app/api/:splat"
+  to = "https://6d-production.up.railway.app/api/:splat"
   status = 200
   force = true

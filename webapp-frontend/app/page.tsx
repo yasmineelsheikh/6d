@@ -307,12 +307,12 @@ export default function Home() {
     setError(null)
     
     try {
-      const response = await fetch(`/api/datasets/${datasetName}/info`)
+      const response = await fetch(`${API_BASE}/api/datasets/${datasetName}/info`)
       if (!response.ok) throw new Error('Failed to load dataset info')
       const info = await response.json()
       setDatasetInfo(info)
       
-      const dataResponse = await fetch(`/api/datasets/${datasetName}/data`)
+      const dataResponse = await fetch(`${API_BASE}/api/datasets/${datasetName}/data`)
       if (!dataResponse.ok) throw new Error('Failed to load dataset data')
       const data = await dataResponse.json()
       setDatasetData(data.data || [])
@@ -326,7 +326,7 @@ export default function Home() {
   const handleAugmentationComplete = async (datasetName: string) => {
     // Reload dataset data for curated view
     try {
-      const dataResponse = await fetch(`/api/datasets/${datasetName}/data`)
+      const dataResponse = await fetch(`${API_BASE}/api/datasets/${datasetName}/data`)
       if (!dataResponse.ok) throw new Error('Failed to load curated data')
       const data = await dataResponse.json()
       setCuratedData(data.data || [])
@@ -365,7 +365,7 @@ export default function Home() {
         // Always send axes parameter, even if empty, so backend knows user's selection
         params.append('axes', JSON.stringify(selectedAxes))
         
-        const url = `/api/ares/distributions${params.toString() ? '?' + params.toString() : ''}`
+        const url = `${API_BASE}/api/ares/distributions${params.toString() ? '?' + params.toString() : ''}`
         const distResponse = await fetch(url)
         if (distResponse.ok) {
           const distData = await distResponse.json()
@@ -497,7 +497,7 @@ export default function Home() {
   const handleExportDataset = async () => {
     if (!currentDataset) return
     try {
-      const response = await fetch(`/api/datasets/${currentDataset}/export?format=csv`)
+      const response = await fetch(`${API_BASE}/api/datasets/${currentDataset}/export?format=csv`)
       if (!response.ok) {
         throw new Error('Failed to export dataset')
       }

@@ -23,6 +23,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
@@ -58,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token])
 
   const login = async (email: string, password: string) => {
-    const response = await axios.post('/api/auth/login', { email, password })
+    const response = await axios.post(`${API_BASE}/api/auth/login`, { email, password })
     const { access_token, user: userData } = response.data
     
     setToken(access_token)
@@ -69,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const register = async (email: string, first_name: string, last_name: string, password: string) => {
-    const response = await axios.post('/api/auth/register', {
+    const response = await axios.post(`${API_BASE}/api/auth/register`, {
       email,
       first_name,
       last_name,
