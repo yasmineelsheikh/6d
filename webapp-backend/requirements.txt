@@ -16,8 +16,41 @@ email-validator
 tqdm
 click
 numpy
+scipy
+
 # CPU-only PyTorch (much smaller, ~500MB vs ~2-3GB)
 # Use -f (find-links) to specify CPU wheel repository - must come before torch
 -f https://download.pytorch.org/whl/cpu
 torch==2.1.0
-#torch
+
+# ML/AI libraries
+transformers
+sentence-transformers
+litellm
+jinja2
+tenacity
+
+# Computer vision and image processing
+opencv-python
+Pillow
+moviepy
+pycocotools
+
+# Clustering and visualization
+hdbscan
+umap-learn
+plotly
+
+# String processing
+python-Levenshtein
+
+# TensorFlow (used in open_x_embodiment_configs and extractor)
+# Note: This is a large package (~500MB), but required for certain dataset types
+tensorflow
+tensorflow-datasets
+
+# Optional: MongoDB (only if using MongoDB instead of PostgreSQL)
+# pymongo
+
+# Optional: Google Cloud AI (only if using Gemini via Vertex AI)
+# google-cloud-aiplatform
