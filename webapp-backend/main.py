@@ -634,13 +634,80 @@ def run_ingestion_for_dataset(dataset_name: str, dataset_path: str, task: str = 
         from sqlalchemy import text
 
         # Dynamically import run_ingestion_pipeline from the project root main.py
-        main_path = project_root / "main.py"
-        spec = importlib.util.spec_from_file_location("ares_ingestion_main", main_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not load main.py from {main_path}")
-        main_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(main_module)
-        run_ingestion_pipeline = getattr(main_module, "run_ingestion_pipeline")
+        # On Railway, the root is webapp-backend, so project_root points to the wrong location
+        # Try to find main.py, but if not found, use inline version
+        possible_paths = [
+            current_dir / "main.py",  # webapp-backend/main.py (if copied)
+        ]
+        
+        # Only check project_root if it's not the filesystem root (Railway case)
+        if str(project_root) != "/" and project_root.exists():
+            possible_paths.append(project_root / "main.py")  # demo/ares-platform/main.py (full repo)
+        
+        main_path = None
+        for path in possible_paths:
+            if path.exists() and path.is_file():
+                main_path = path
+                print(f"Found main.py at: {main_path}")
+                break
+        
+        if main_path is None:
+            # If main.py doesn't exist, define run_ingestion_pipeline inline
+            print("Warning: main.py not found, using inline run_ingestion_pipeline")
+            
+            # Set up scripts path (similar to upload_dataset)
+            # On Railway, root is webapp-backend, so scripts should be in current_dir/scripts
+            scripts_in_current = current_dir / "scripts"
+            scripts_parent = current_dir.parent
+            scripts_in_parent = scripts_parent / "scripts" if str(scripts_parent) != "/" else None
+            
+            if scripts_in_current.exists() and scripts_in_current.is_dir():
+                if str(current_dir) not in sys.path:
+                    sys.path.insert(0, str(current_dir))
+                print(f"Using scripts from current directory: {scripts_in_current}")
+            elif scripts_in_parent and scripts_in_parent.exists() and scripts_in_parent.is_dir():
+                if str(scripts_parent) not in sys.path:
+                    sys.path.insert(0, str(scripts_parent))
+                print(f"Using scripts from parent directory: {scripts_in_parent}")
+            elif str(project_root) != "/" and project_root.exists():
+                if str(project_root) not in sys.path:
+                    sys.path.insert(0, str(project_root))
+                print(f"Using project_root for scripts: {project_root}")
+            else:
+                print(f"Warning: Could not find scripts directory. Tried: {scripts_in_current}, {scripts_in_parent}")
+            
+            from scripts.run_structured_ingestion import run_structured_database_ingestion
+            from scripts.run_trajectory_embedding_ingestion import run_embedding_database_ingestion_per_dataset
+            from ares.databases.structured_database import setup_rollouts
+            from ares.databases.embedding_database import EMBEDDING_DB_PATH
+            
+            def run_ingestion_pipeline(
+                ds, dataset_info, dataset_formalname, vlm_name, engine, 
+                dataset_filename, embedder, split
+            ):
+                """Inline version of run_ingestion_pipeline."""
+                structured_failures, new_rollout_ids = asyncio.run(
+                    run_structured_database_ingestion(
+                        ds, dataset_info, dataset_formalname, vlm_name,
+                        engine, dataset_filename,
+                    )
+                )
+                rollouts = setup_rollouts(engine, dataset_formalname)
+                if new_rollout_ids is not None:
+                    rollouts = [r for r in rollouts if r.id in new_rollout_ids]
+                if len(rollouts) == 0:
+                    raise ValueError(f"No rollouts found for {dataset_formalname} in {split}")
+                run_embedding_database_ingestion_per_dataset(
+                    rollouts, embedder, index_path=EMBEDDING_DB_PATH
+                )
+                return dict(structured_failures=structured_failures)
+        else:
+            spec = importlib.util.spec_from_file_location("ares_ingestion_main", main_path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not load main.py from {main_path}")
+            main_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(main_module)
+            run_ingestion_pipeline = getattr(main_module, "run_ingestion_pipeline")
         from tqdm import tqdm
 
         # Initialize VLM, engine, and embedder
