@@ -48,6 +48,7 @@ python-Levenshtein
 # Note: This is a large package (~500MB), but required for certain dataset types
 tensorflow
 tensorflow-datasets
+tf-keras
 
 # Optional: MongoDB (only if using MongoDB instead of PostgreSQL)
 # pymongo
