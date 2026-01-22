@@ -17,6 +17,7 @@ tqdm
 click
 numpy
 scipy
+psutil
 #
 # CPU-only PyTorch (much smaller, ~500MB vs ~2-3GB)
 # Use -f (find-links) to specify CPU wheel repository - must come before torch
@@ -35,6 +36,10 @@ tenacity
 opencv-python-headless
 Pillow
 moviepy
+imageio
+imageio-ffmpeg
+decorator
+proglog
 pycocotools
 
 # Clustering and visualization
