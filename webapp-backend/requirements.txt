@@ -20,9 +20,9 @@ scipy
 
 # CPU-only PyTorch (much smaller, ~500MB vs ~2-3GB)
 # Use -f (find-links) to specify CPU wheel repository - must come before torch
--f https://download.pytorch.org/whl/cpu
-torch==2.1.0
-
+#-f https://download.pytorch.org/whl/cpu
+#torch==2.1.0
+torch
 # ML/AI libraries
 transformers
 sentence-transformers
