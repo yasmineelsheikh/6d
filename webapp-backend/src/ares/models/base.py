@@ -8,7 +8,7 @@ from contextlib import nullcontext
 
 import numpy as np
 import torch
-import vertexai
+#import vertexai
 from jinja2 import Environment, FileSystemLoader
 from litellm import acompletion, completion
 from litellm.utils import ModelResponse
@@ -16,7 +16,7 @@ from PIL import Image
 from sentence_transformers import SentenceTransformer
 from tenacity import retry, stop_after_attempt, wait_exponential
 from transformers import AutoModel, AutoProcessor
-from vertexai.generative_models import GenerativeModel, Part
+#from vertexai.generative_models import GenerativeModel, Part
 
 from ares.utils.image_utils import encode_image
 
@@ -229,7 +229,7 @@ class VLM:
         return await asyncio.gather(*tasks)
 
 
-class GeminiVideoVLM(VLM):
+"""class GeminiVideoVLM(VLM):
     def __init__(self, provider: str, name: str):
         super().__init__(provider, name)
         vertexai.init(
@@ -273,7 +273,7 @@ class GeminiVideoVLM(VLM):
             messages,
             generation_config=self.generation_config,
         )
-        return messages, responses
+        return messages, responses """
 
 
 class Embedder:
