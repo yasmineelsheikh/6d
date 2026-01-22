@@ -31,7 +31,8 @@ jinja2
 tenacity
 
 # Computer vision and image processing
-opencv-python
+#opencv-python
+opencv-python-headless
 Pillow
 moviepy
 pycocotools
