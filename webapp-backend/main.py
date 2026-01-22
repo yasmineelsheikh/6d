@@ -633,25 +633,28 @@ def run_ingestion_for_dataset(dataset_name: str, dataset_path: str, task: str = 
         from ares.utils.image_utils import split_video_to_frames
         from sqlalchemy import text
 
-        # Dynamically import run_ingestion_pipeline from the project root main.py
-        # On Railway, the root is webapp-backend, so project_root points to the wrong location
-        # Try to find main.py, but if not found, use inline version
-        possible_paths = [
-            current_dir / "main.py",  # webapp-backend/main.py (if copied)
-        ]
+        # Import run_ingestion_pipeline from ingestion_main.py (copied to webapp-backend/)
+        # On Railway, the root is webapp-backend, so we look for ingestion_main.py in current_dir
+        ingestion_main_path = current_dir / "ingestion_main.py"
         
-        # Only check project_root if it's not the filesystem root (Railway case)
-        if str(project_root) != "/" and project_root.exists():
-            possible_paths.append(project_root / "main.py")  # demo/ares-platform/main.py (full repo)
+        if ingestion_main_path.exists() and ingestion_main_path.is_file():
+            # Load from the copied ingestion_main.py file
+            try:
+                spec = importlib.util.spec_from_file_location("ares_ingestion_main", ingestion_main_path)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"Could not load ingestion_main.py from {ingestion_main_path}")
+                main_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(main_module)
+                run_ingestion_pipeline = getattr(main_module, "run_ingestion_pipeline")
+                print(f"Loaded run_ingestion_pipeline from: {ingestion_main_path}")
+            except Exception as e:
+                print(f"Error loading from ingestion_main.py: {e}, falling back to inline version")
+                run_ingestion_pipeline = None
+        else:
+            run_ingestion_pipeline = None
         
-        main_path = None
-        for path in possible_paths:
-            if path.exists() and path.is_file():
-                main_path = path
-                print(f"Found main.py at: {main_path}")
-                break
-        
-        if main_path is None:
+        # Fallback to inline version if ingestion_main.py is not available
+        if run_ingestion_pipeline is None:
             # If main.py doesn't exist, define run_ingestion_pipeline inline
             print("Warning: main.py not found, using inline run_ingestion_pipeline")
             
@@ -701,13 +704,7 @@ def run_ingestion_for_dataset(dataset_name: str, dataset_path: str, task: str = 
                     rollouts, embedder, index_path=EMBEDDING_DB_PATH
                 )
                 return dict(structured_failures=structured_failures)
-        else:
-            spec = importlib.util.spec_from_file_location("ares_ingestion_main", main_path)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Could not load main.py from {main_path}")
-            main_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(main_module)
-            run_ingestion_pipeline = getattr(main_module, "run_ingestion_pipeline")
+        
         from tqdm import tqdm
 
         # Initialize VLM, engine, and embedder
