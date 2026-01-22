@@ -72,6 +72,10 @@ async def options_datasets_upload(request: Request):
 frontend_origins = [
     "https://6d-8jlk-git-main-yasmines-projects-3b23a4db.vercel.app",
     "https://6d-8jlk.vercel.app",
+    "app.6dlabs.com",
+    "https://app.6dlabs.com",
+
+
 ]
 app.add_middleware(
     CORSMiddleware,
