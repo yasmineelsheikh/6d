@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 import requests
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 # Add project root and src/ to path so we can import the ares package
@@ -59,6 +60,14 @@ from auth import (
 )
 
 app = FastAPI(title="Ares Platform API", version="1.0.0")
+
+from fastapi import Request
+from fastapi.responses import Response
+
+@app.options("/api/datasets/upload")
+async def options_datasets_upload(request: Request):
+    return Response(status_code=200)
+
 # CORS middleware - allow all origins for development
 frontend_origins = [
     "https://6d-8jlk-git-main-yasmines-projects-3b23a4db.vercel.app",
