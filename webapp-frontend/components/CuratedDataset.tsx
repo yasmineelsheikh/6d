@@ -6,6 +6,8 @@ import DatasetOverview from './DatasetOverview'
 import DatasetDistributions from './DatasetDistributions'
 import EpisodePreview from './EpisodePreview'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''
+
 interface CuratedDatasetProps {
   datasetName: string
   datasetData: any[]
@@ -17,7 +19,7 @@ export default function CuratedDataset({ datasetName, datasetData }: CuratedData
   useEffect(() => {
     const loadInfo = async () => {
       try {
-        const response = await fetch(`/api/datasets/${datasetName}/info`)
+        const response = await fetch(`${API_BASE}/api/datasets/${datasetName}/info`)
         if (response.ok) {
           const info = await response.json()
           setDatasetInfo(info)
@@ -31,7 +33,7 @@ export default function CuratedDataset({ datasetName, datasetData }: CuratedData
 
   const handleExport = async () => {
     try {
-      const response = await fetch(`/api/datasets/${datasetName}/export?format=csv`)
+      const response = await fetch(`${API_BASE}/api/datasets/${datasetName}/export?format=csv`)
       if (!response.ok) throw new Error('Export failed')
       const data = await response.json()
       
