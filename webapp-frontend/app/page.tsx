@@ -59,6 +59,9 @@ export default function Home() {
   const [uploadMode, setUploadMode] = useState<'local' | 's3'>('local')
   const [uploadedFiles, setUploadedFiles] = useState<FileList | null>(null)
   const [s3Path, setS3Path] = useState('')
+  const [ingestionStatus, setIngestionStatus] = useState<'in_progress' | 'complete' | 'failed' | null>(null)
+  const [ingestingDatasetName, setIngestingDatasetName] = useState<string | null>(null)
+  const [ingestionProgress, setIngestionProgress] = useState(0)
   
   // Plot configuration state
   const [environment, setEnvironment] = useState<'Indoor' | 'Outdoor' | ''>('')
@@ -186,21 +189,101 @@ export default function Home() {
         throw new Error(errorMessage)
       }
 
+      // Upload successful - start polling for ingestion status
       setUploadSuccess(true)
-      // Navigate to dataset page with environment and axes as query parameters
-      const params = new URLSearchParams()
-      if (environment) {
-        params.append('environment', environment)
+      setIngestingDatasetName(finalDatasetName)
+      setIngestionStatus('in_progress')
+      setIngestionProgress(10) // Start at 10%
+      
+      // Poll for ingestion completion
+      const pollIngestionStatus = async () => {
+        const maxAttempts = 300 // 5 minutes max (300 * 1 second)
+        let attempts = 0
+        
+        const checkStatus = async (): Promise<void> => {
+          try {
+            const statusResponse = await fetch(`${API_BASE}/api/datasets/${encodeURIComponent(finalDatasetName)}/ingestion-status`)
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json()
+              const status = statusData.status
+              
+              if (status === 'complete') {
+                setIngestionProgress(100)
+                setIngestionStatus('complete')
+                // Small delay to show 100% progress, then navigate
+                setTimeout(() => {
+                  const params = new URLSearchParams()
+                  if (environment) {
+                    params.append('environment', environment)
+                  }
+                  if (selectedAxes.length > 0) {
+                    params.append('axes', JSON.stringify(selectedAxes))
+                  }
+                  const queryString = params.toString()
+                  const url = `/dataset/${encodeURIComponent(finalDatasetName)}${queryString ? '?' + queryString : ''}`
+                  router.push(url)
+                  setUploadLoading(false)
+                }, 500)
+                return
+              } else if (status === 'failed') {
+                setIngestionStatus('failed')
+                setError('Dataset ingestion failed. Please try again.')
+                setUploadLoading(false)
+                return
+              } else if (status === 'in_progress') {
+                setIngestionStatus('in_progress')
+                // Simulate progress (0-90%) while in progress
+                const progress = Math.min(90, 10 + (attempts * 0.5))
+                setIngestionProgress(progress)
+                attempts++
+                if (attempts < maxAttempts) {
+                  setTimeout(checkStatus, 1000) // Poll every 1 second
+                } else {
+                  setError('Ingestion is taking longer than expected. Please check back later.')
+                  setUploadLoading(false)
+                }
+              } else {
+                // not_started - wait a bit and check again
+                attempts++
+                if (attempts < maxAttempts) {
+                  setTimeout(checkStatus, 1000)
+                } else {
+                  setError('Ingestion did not start. Please try again.')
+                  setUploadLoading(false)
+                }
+              }
+            } else {
+              // Status endpoint error - assume in progress and keep polling
+              attempts++
+              if (attempts < maxAttempts) {
+                setTimeout(checkStatus, 1000)
+              } else {
+                setError('Could not check ingestion status. Please try again.')
+                setUploadLoading(false)
+              }
+            }
+          } catch (err) {
+            console.error('Error checking ingestion status:', err)
+            attempts++
+            if (attempts < maxAttempts) {
+              setTimeout(checkStatus, 1000)
+            } else {
+              setError('Error checking ingestion status. Please try again.')
+              setUploadLoading(false)
+            }
+          }
+        }
+        
+        // Start polling after a short delay
+        setTimeout(checkStatus, 1000)
       }
-      if (selectedAxes.length > 0) {
-        params.append('axes', JSON.stringify(selectedAxes))
-      }
-      const queryString = params.toString()
-      const url = `/dataset/${encodeURIComponent(finalDatasetName)}${queryString ? '?' + queryString : ''}`
-      router.push(url)
+      
+      pollIngestionStatus()
     } catch (error: any) {
       setError(error.message)
       setUploadLoading(false)
+      setIngestionStatus(null)
+      setIngestingDatasetName(null)
     }
   }
 
@@ -547,6 +630,21 @@ export default function Home() {
         </div>
       </header>
 
+      {/* Show loading page while ingestion is in progress */}
+      {ingestionStatus === 'in_progress' && ingestingDatasetName ? (
+        <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
+          <div className="w-full max-w-md px-8">
+            <div className="h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-[#9aa4b5] rounded-full transition-all duration-500 ease-out"
+                style={{
+                  width: `${ingestionProgress}%`
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Upload Data Section */}
         <div className="mb-8">
@@ -846,6 +944,7 @@ export default function Home() {
           </div>
         )}
       </main>
+      )}
 
       {/* Login Modal */}
       <LoginModal

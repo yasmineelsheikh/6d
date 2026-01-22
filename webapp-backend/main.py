@@ -1037,58 +1037,83 @@ async def upload_dataset(
                 detail="No files were uploaded or saved."
             )
         
-        # Validate dataset structure
-        if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists() or not (upload_dir / "videos").exists():
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
-            )
-        
-        # Run basic ingestion (no database creation)
-        # Find scripts/ folder - check multiple locations
-        current_dir = Path(__file__).parent  # webapp-backend/
-        scripts_in_current = current_dir / "scripts"  # webapp-backend/scripts/ (copied for Railway)
-        scripts_parent = current_dir.parent  # demo/ares-platform/
-        scripts_in_parent = scripts_parent / "scripts"  # demo/ares-platform/scripts/
-        
-        # Prefer scripts in current directory (webapp-backend/scripts/) for Railway deployments
-        if scripts_in_current.exists() and scripts_in_current.is_dir():
-            if str(current_dir) not in sys.path:
-                sys.path.insert(0, str(current_dir))
-                print(f"Using scripts from current directory: {scripts_in_current}")
-        elif scripts_in_parent.exists() and scripts_in_parent.is_dir():
-            # Fallback: scripts in parent directory (full repo structure)
-            if str(scripts_parent) not in sys.path:
-                sys.path.insert(0, str(scripts_parent))
-                print(f"Using scripts from parent directory: {scripts_in_parent}")
-        elif str(project_root) not in sys.path:
-            # Last resort: try project_root
-            sys.path.insert(0, str(project_root))
-            print(f"Using project_root: {project_root}")
-        
-        from scripts.ingest_lerobot_dataset import ingest_dataset
-        count = ingest_dataset(str(upload_dir), None, dataset_name)
+        # Validate dataset structure (only if using local filesystem)
+        if not use_supabase:
+            if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists() or not (upload_dir / "videos").exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
+                )
+        else:
+            # For Supabase, create a temporary directory for ingestion to work with
+            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
+                upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
+            else:
+                upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Created temporary upload directory for ingestion: {upload_dir}")
         
         # Store the dataset path for later use
         dataset_paths[dataset_name] = str(upload_dir)
         
-        # Run the full ingestion pipeline to populate robot_data.db in the background.
-        # This is best-effort for plots; core dataset info and previews do not depend on it.
-        print(f"Starting background ingestion pipeline for uploaded dataset: {dataset_name}")
+        # Mark ingestion as starting
+        ingestion_status[dataset_name] = "in_progress"
+        
+        # Return immediately - run ingestion in background
+        print(f"Files uploaded successfully. Starting background ingestion for dataset: {dataset_name}")
         try:
             loop = asyncio.get_running_loop()
-            # Fire-and-forget: do not await, so upload can succeed regardless of ingestion outcome.
-            loop.run_in_executor(None, run_ingestion_for_dataset, dataset_name, str(upload_dir), dataset_name)
+            
+            def run_full_ingestion():
+                """Run both basic ingestion and full pipeline in background."""
+                try:
+                    # Find scripts/ folder - check multiple locations
+                    current_dir = Path(__file__).parent  # webapp-backend/
+                    scripts_in_current = current_dir / "scripts"  # webapp-backend/scripts/ (copied for Railway)
+                    scripts_parent = current_dir.parent  # demo/ares-platform/
+                    scripts_in_parent = scripts_parent / "scripts"  # demo/ares-platform/scripts/
+                    
+                    # Prefer scripts in current directory (webapp-backend/scripts/) for Railway deployments
+                    if scripts_in_current.exists() and scripts_in_current.is_dir():
+                        if str(current_dir) not in sys.path:
+                            sys.path.insert(0, str(current_dir))
+                            print(f"Using scripts from current directory: {scripts_in_current}")
+                    elif scripts_in_parent.exists() and scripts_in_parent.is_dir():
+                        # Fallback: scripts in parent directory (full repo structure)
+                        if str(scripts_parent) not in sys.path:
+                            sys.path.insert(0, str(scripts_parent))
+                        print(f"Using scripts from parent directory: {scripts_in_parent}")
+                    elif str(project_root) not in sys.path:
+                        # Last resort: try project_root
+                        sys.path.insert(0, str(project_root))
+                        print(f"Using project_root: {project_root}")
+                    
+                    # Run basic ingestion first
+                    from scripts.ingest_lerobot_dataset import ingest_dataset
+                    count = ingest_dataset(str(upload_dir), None, dataset_name)
+                    print(f"Basic ingestion completed: {count} episodes")
+                    
+                    # Then run the full ingestion pipeline
+                    run_ingestion_for_dataset(dataset_name, str(upload_dir), dataset_name)
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    print(f"Error in background ingestion for {dataset_name}: {error_trace}")
+                    ingestion_status[dataset_name] = "failed"
+            
+            # Fire-and-forget: do not await, so upload can succeed immediately
+            loop.run_in_executor(None, run_full_ingestion)
         except Exception as ingestion_error:
             import traceback
             error_trace = traceback.format_exc()
             print(f"Error scheduling ingestion for {dataset_name}: {error_trace}")
+            ingestion_status[dataset_name] = "failed"
         
         return {
             "success": True,
             "dataset_name": dataset_name,
             "dataset_path": str(upload_dir),
-            "episodes_ingested": count
+            "message": "Upload successful. Ingestion is running in the background."
         }
     except HTTPException:
         raise
@@ -1100,6 +1125,21 @@ async def upload_dataset(
             status_code=500,
             content={"detail": f"Error uploading dataset: {str(e)}"}
         )
+
+@app.get("/api/datasets/{dataset_name}/ingestion-status")
+async def get_ingestion_status(dataset_name: str):
+    """Get the ingestion status for a dataset."""
+    status = ingestion_status.get(dataset_name)
+    if status is None:
+        return {"status": "not_started", "message": "Ingestion has not been started for this dataset"}
+    return {
+        "status": status,
+        "message": {
+            "in_progress": "Ingestion is in progress...",
+            "complete": "Ingestion completed successfully",
+            "failed": "Ingestion failed"
+        }.get(status, "Unknown status")
+    }
 
 @app.post("/api/datasets/load")
 async def load_dataset(request: DatasetLoadRequest):
