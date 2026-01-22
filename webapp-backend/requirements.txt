@@ -14,6 +14,7 @@ bcrypt
 python-multipart
 email-validator
 tqdm
+streamlit
 click
 numpy
 scipy
