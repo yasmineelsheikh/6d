@@ -35,7 +35,9 @@ tenacity
 #opencv-python
 opencv-python-headless
 Pillow
-moviepy
+#moviepy
+moviepy==1.0.3
+
 imageio
 imageio-ffmpeg
 decorator
