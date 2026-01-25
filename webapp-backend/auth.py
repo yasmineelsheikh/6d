@@ -48,7 +48,7 @@ class User(Base):
 
 # Create tables if they don't exist
 try:
-Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
 except Exception as e:
     print(f"Warning: Could not create database tables at startup: {e}")
 
