@@ -21,6 +21,7 @@ app = FastAPI()
 
 class CosmosRequest(BaseModel):
     dataset_name: str
+    job_id: str
 
 
 def download_folder_from_s3(s3_prefix: str, local_path: str) -> None:
@@ -52,7 +53,9 @@ def download_folder_from_s3(s3_prefix: str, local_path: str) -> None:
 @app.post("/run-json")
 def run_cosmos(req: CosmosRequest):
     dataset_name = req.dataset_name
-    s3_prefix = f"input_data/{dataset_name}"
+    job_id = req.job_id
+    # Use job-based organization for input data
+    s3_prefix = f"jobs/{job_id}/input"
 
     # Create temporary directory for downloaded files
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -80,17 +83,17 @@ def run_cosmos(req: CosmosRequest):
             for i, video_path in enumerate(video_files):
                 episode_index = Path(video_path).stem
 
-        # Prepare JSON input for Cosmos
+                # Prepare JSON input for Cosmos
                 cosmos_input_spec = os.path.join(temp_dir, f"input_spec_{i}.json")
-        cosmos_input = {
+                cosmos_input = {
                     "name": f"{dataset_name}_{episode_index}",
-            "prompt_path": prompt_path,
+                    "prompt_path": prompt_path,
                     "video_path": video_path,
-            "guidance": 3,
-            "edge": {"control_weight": 0.5},
-            "vis": {"control_weight": 0.2}
-        }
-        with open(cosmos_input_spec, "w") as f:
+                    "guidance": 3,
+                    "edge": {"control_weight": 0.5},
+                    "vis": {"control_weight": 0.2}
+                }
+                with open(cosmos_input_spec, "w") as f:
                     json.dump(cosmos_input, f, indent=2)
 
                 # Create output directory
@@ -108,10 +111,10 @@ def run_cosmos(req: CosmosRequest):
                 command = [
                     "python",
                     cosmos_script,
-            "-i", cosmos_input_spec,
+                    "-i", cosmos_input_spec,
                     f"setup.output_dir={output_dir}",
                     "--s3-bucket", S3_BUCKET,
-                    "--s3-prefix", f"outputs/{dataset_name}"
+                    "--s3-prefix", f"jobs/{job_id}/output"
                 ]
 
                 try:
@@ -127,9 +130,12 @@ def run_cosmos(req: CosmosRequest):
                 output_files = list(Path(output_dir).glob("*.mp4"))
                 if output_files:
                     output_video = output_files[0]
-                    # Upload output to S3
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                    s3_key = f"outputs/{dataset_name}/{episode_index}_{timestamp}.mp4"
+                    # Upload output to S3 with job-based organization
+                    # Use original episode name with _output_N suffix for intuitive naming
+                    # This allows for multiple outputs per input in the future (e.g., episode_0_output_1.mp4, episode_0_output_2.mp4)
+                    original_episode_name = Path(video_path).name  # e.g., "episode_0.mp4"
+                    output_filename = original_episode_name.replace('.mp4', '_output_1.mp4')
+                    s3_key = f"jobs/{job_id}/output/{output_filename}"
 
                     try:
                         s3.upload_file(str(output_video), S3_BUCKET, s3_key)

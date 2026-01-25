@@ -33,16 +33,18 @@ export default function CuratedDataset({ datasetName, datasetData }: CuratedData
 
   const handleExport = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/datasets/${datasetName}/export?format=csv`)
-      if (!response.ok) throw new Error('Export failed')
-      const data = await response.json()
+      const response = await fetch(`${API_BASE}/api/datasets/${datasetName}/export`)
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || 'Export failed')
+      }
       
-      // Create download link
-      const blob = new Blob([data.content], { type: 'text/csv' })
+      // Get the zip file as a blob
+      const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = data.filename
+      a.download = `${datasetName}_export.zip`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)

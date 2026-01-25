@@ -530,21 +530,25 @@ export default function Home() {
   const handleExportDataset = async () => {
     if (!currentDataset) return
     try {
-      const response = await fetch(`${API_BASE}/api/datasets/${currentDataset}/export?format=csv`)
+      const response = await fetch(`${API_BASE}/api/datasets/${currentDataset}/export`)
       if (!response.ok) {
-        throw new Error('Failed to export dataset')
+        const errorText = await response.text()
+        throw new Error(errorText || 'Failed to export dataset')
       }
-      const data = await response.json()
-      const blob = new Blob([data.content], { type: 'text/csv' })
+      
+      // Get the zip file as a blob
+      const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = data.filename || `${currentDataset}.csv`
+      a.download = `${currentDataset}_export.zip`
+      document.body.appendChild(a)
       a.click()
+      document.body.removeChild(a)
       window.URL.revokeObjectURL(url)
-    } catch (err) {
+    } catch (err: any) {
       console.error('Export error:', err)
-      alert('Failed to export dataset')
+      alert(err.message || 'Failed to export dataset')
     }
   }
 
@@ -1070,7 +1074,7 @@ export default function Home() {
               onClick={handleExportDataset}
               className="px-4 py-2 text-xs bg-[#4b6671] text-white hover:bg-[#3d5560] transition-colors border border-[#2a2a2a]"
             >
-              Export Dataset (CSV)
+              Export Dataset
             </button>
           </div>
         )}

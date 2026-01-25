@@ -10,6 +10,8 @@ import tempfile
 import importlib.util
 import asyncio
 import uuid
+import zipfile
+import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import traceback
@@ -512,12 +514,12 @@ def generate_job_id() -> str:
 def upload_file_to_s3(job_id: str, dataset_name: str, file_path: str, file_content: bytes) -> str:
     """
     Upload a file to S3 with job-based organization.
-    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/{file_path}
+    Structure: s3://{bucket}/jobs/{job_id}/input/{file_path}
     """
     # Ensure no leading slash in file_path
     object_path = file_path.lstrip("/")
-    # Build S3 key: jobs/{job_id}/{dataset_name}/{file_path}
-    s3_key = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/{object_path}".replace("\\", "/")
+    # Build S3 key: jobs/{job_id}/input/{file_path}
+    s3_key = f"{S3_JOBS_PREFIX}/{job_id}/input/{object_path}".replace("\\", "/")
     
     try:
         s3.put_object(
@@ -536,10 +538,10 @@ def upload_file_to_s3(job_id: str, dataset_name: str, file_path: str, file_conte
 def download_file_from_s3(job_id: str, dataset_name: str, file_path: str) -> bytes:
     """
     Download a file from S3 with job-based organization.
-    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/{file_path}
+    Structure: s3://{bucket}/jobs/{job_id}/input/{file_path}
     """
     object_path = file_path.lstrip("/")
-    s3_key = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/{object_path}".replace("\\", "/")
+    s3_key = f"{S3_JOBS_PREFIX}/{job_id}/input/{object_path}".replace("\\", "/")
     
     try:
         response = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
@@ -559,9 +561,9 @@ def download_file_from_s3(job_id: str, dataset_name: str, file_path: str) -> byt
 def list_files_in_s3(job_id: str, dataset_name: str, folder_path: str = "") -> List[Dict[str, Any]]:
     """
     List all files in an S3 folder with job-based organization.
-    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/{folder_path}
+    Structure: s3://{bucket}/jobs/{job_id}/input/{folder_path}
     """
-    prefix = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/"
+    prefix = f"{S3_JOBS_PREFIX}/{job_id}/input/"
     if folder_path:
         prefix += folder_path.rstrip("/") + "/"
     
@@ -592,9 +594,9 @@ def list_files_in_s3(job_id: str, dataset_name: str, folder_path: str = "") -> L
 def download_dataset_from_s3(job_id: str, dataset_name: str, local_path: Path) -> Path:
     """
     Download entire dataset from S3 to local path for ingestion.
-    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/
+    Structure: s3://{bucket}/jobs/{job_id}/input/
     """
-    prefix = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/"
+    prefix = f"{S3_JOBS_PREFIX}/{job_id}/input/"
     local_path.mkdir(parents=True, exist_ok=True)
     
     try:
@@ -1261,7 +1263,7 @@ async def upload_dataset(
         print(f"Created temporary upload directory for ingestion: {upload_dir}")
         
         # Store dataset info with job ID and S3 path
-        s3_path = f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/"
+        s3_path = f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/"
         dataset_paths[dataset_name] = {
             "job_id": job_id,
             "s3_path": s3_path,
@@ -1868,8 +1870,8 @@ async def run_augmentation(request: AugmentationRequest):
                 f.write(variation_text)
             
             # Upload to S3 with job-based organization
-            # Structure: s3://{bucket}/jobs/{job_id}/prompts/{dataset_name}/{prompt_folder_name}/{filename}
-            s3_prompt_path = f"prompts/{request.dataset_name}/{prompt_folder_name}/{filename}"
+            # Structure: s3://{bucket}/jobs/{job_id}/prompts/{prompt_folder_name}/{filename}
+            s3_prompt_path = f"prompts/{prompt_folder_name}/{filename}"
             upload_file_to_s3(job_id, request.dataset_name, s3_prompt_path, variation_text.encode('utf-8'))
             saved_files.append(s3_prompt_path)
             txt_file_path = s3_prompt_path
@@ -1911,7 +1913,7 @@ async def run_augmentation(request: AugmentationRequest):
             "descriptions_count": len(descriptions),
             "variations_count": len(variations),
             "saved_files": saved_files,
-            "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/{request.dataset_name}/prompts/{prompt_folder_name}/",
+            "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/prompts/{prompt_folder_name}/",
             "message": f"Generated {len(variations)} prompt variations and uploaded to S3"
         }
                 
@@ -2013,22 +2015,133 @@ async def upload_test_data(request: TestingUploadRequest):
         raise HTTPException(status_code=500, detail=f"Error uploading test data: {str(e)}")
 
 @app.get("/api/datasets/{dataset_name}/export")
-async def export_dataset(dataset_name: str, format: str = "csv"):
-    """Export dataset in the specified format."""
+async def export_dataset(dataset_name: str):
+    """Export dataset as a zip file containing original episodes and generated output videos."""
     try:
-        # Ares database access removed - return empty export
-        # In a real implementation, you'd read from dataset files directly
-        if format == "csv":
-            csv_content = ""  # Empty CSV since no database
-            return JSONResponse(
-                content={"content": csv_content, "filename": f"{dataset_name}.csv"},
-                media_type="application/json"
+        # Check if dataset exists
+        if dataset_name not in dataset_paths:
+            raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
+        
+        dataset_info = dataset_paths[dataset_name]
+        job_id = dataset_info.get("job_id")
+        
+        if not job_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dataset '{dataset_name}' does not have a job ID. Cannot export."
             )
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported format: {format}")
+        
+        # Create temporary directory for export
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_dir = Path(temp_dir)
+            
+            # Download original episodes from S3
+            # Structure: s3://{bucket}/jobs/{job_id}/input/videos/
+            original_prefix = f"{S3_JOBS_PREFIX}/{job_id}/input/videos/"
+            print(f"Downloading original episodes from s3://{S3_BUCKET}/{original_prefix}")
+            
+            original_files = {}
+            try:
+                paginator = s3.get_paginator('list_objects_v2')
+                pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=original_prefix)
+                
+                for page in pages:
+                    if 'Contents' not in page:
+                        continue
+                    for obj in page['Contents']:
+                        s3_key = obj['Key']
+                        if s3_key == original_prefix or s3_key.endswith('/'):
+                            continue
+                        
+                        # Get filename from S3 key
+                        filename = os.path.basename(s3_key)
+                        local_file_path = export_dir / filename
+                        
+                        # Download file
+                        s3.download_file(S3_BUCKET, s3_key, str(local_file_path))
+                        original_files[filename] = local_file_path
+                        print(f"Downloaded original episode: {filename}")
+                
+                if not original_files:
+                    print(f"Warning: No original episodes found in s3://{S3_BUCKET}/{original_prefix}")
+            except Exception as e:
+                print(f"Warning: Error downloading original episodes: {e}")
+                # Continue even if original episodes can't be downloaded
+            
+            # Download output videos from S3
+            # Structure: s3://{bucket}/jobs/{job_id}/output/
+            outputs_prefix = f"{S3_JOBS_PREFIX}/{job_id}/output/"
+            print(f"Downloading output videos from s3://{S3_BUCKET}/{outputs_prefix}")
+            
+            output_files = {}
+            try:
+                paginator = s3.get_paginator('list_objects_v2')
+                pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=outputs_prefix)
+                
+                for page in pages:
+                    if 'Contents' not in page:
+                        continue
+                    for obj in page['Contents']:
+                        s3_key = obj['Key']
+                        if s3_key == outputs_prefix or s3_key.endswith('/'):
+                            continue
+                        
+                        # Get filename from S3 key (should already have _output suffix from server.py)
+                        filename = os.path.basename(s3_key)
+                        local_file_path = export_dir / filename
+                        
+                        # Download file
+                        s3.download_file(S3_BUCKET, s3_key, str(local_file_path))
+                        output_files[filename] = local_file_path
+                        print(f"Downloaded output video: {filename}")
+                
+                if not output_files:
+                    print(f"Warning: No output videos found in s3://{S3_BUCKET}/{outputs_prefix}")
+            except Exception as e:
+                print(f"Warning: Error downloading output videos: {e}")
+                # Continue even if output videos can't be downloaded
+            
+            # Check if we have any files to export
+            if not original_files and not output_files:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No files found to export for dataset '{dataset_name}'. "
+                           f"Original episodes: {len(original_files)}, Output videos: {len(output_files)}"
+                )
+            
+            # Create zip file with all videos in the root (no subfolders)
+            zip_path = Path(temp_dir) / f"{dataset_name}_export.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Add original episodes directly to zip root
+                for filename, file_path in original_files.items():
+                    zipf.write(file_path, filename)
+                
+                # Add output videos directly to zip root
+                for filename, file_path in output_files.items():
+                    zipf.write(file_path, filename)
+            
+            print(f"Created zip file: {zip_path} with {len(original_files)} original episodes and {len(output_files)} output videos")
+            
+            # Read zip file into memory before returning (since temp_dir will be deleted)
+            with open(zip_path, 'rb') as f:
+                zip_content = f.read()
+            
+            # Return zip file as download
+            from fastapi.responses import Response
+            return Response(
+                content=zip_content,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{dataset_name}_export.zip"'
+                }
+            )
+            
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error exporting dataset: {error_trace}")
         raise HTTPException(status_code=500, detail=f"Error exporting dataset: {str(e)}")
 
 # ARES Dashboard API Endpoints (replacing Streamlit functionality)
