@@ -9,15 +9,21 @@ import sys
 import tempfile
 import importlib.util
 import asyncio
+import uuid
+import shutil
+import mimetypes
+import io
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 import traceback
 
 import boto3
+from botocore.exceptions import ClientError
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -419,37 +425,32 @@ async def clear_database():
 
 # Configuration
 POD_API_URL = "https://g6hxoyusgab5l4-8000.proxy.runpod.net/run-json"
-S3_BUCKET = "6d-temp-storage"
-S3_REGION = "us-west-2"
+S3_BUCKET = os.getenv("S3_BUCKET", "6d-temp-storage")
+S3_REGION = os.getenv("S3_REGION", "us-west-2")
 s3 = boto3.client("s3", region_name=S3_REGION)
 
-# Supabase Storage configuration (for datasets and prompts).
-# We talk directly to the Supabase Storage REST API using requests,
-# instead of relying on the supabase-py client (which can be brittle
-# in serverless environments).
+# Supabase configuration (only for authentication - not used for uploads)
+# Uploads now go exclusively to S3
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "datasets")
-# Convenience flag: whether Supabase Storage is usable
-SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
 
-if not SUPABASE_ENABLED:
-    print(
-        "Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set. "
-        "Supabase Storage operations will not be available."
-    )
+# Job tracking: job_id -> job_info
+# Each upload gets a unique job_id for isolation
+# Structure: {job_id: {"status": "uploading|in_progress|processing|complete|failed", "dataset_name": str, "s3_path": str, "created_at": datetime, "updated_at": datetime, "files_uploaded": int, "total_files": int, "error": str}}
+job_tracking: Dict[str, Dict[str, Any]] = {}
 
-# Use /tmp on Vercel/serverless, otherwise use home directory for local dev
-if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-    tmp_dump_dir = "/tmp/ares_webapp_tmp"
-else:
-    tmp_dump_dir = os.path.join(os.path.expanduser("~"), ".ares_webapp_tmp")
+# Use /tmp for ephemeral processing only (no persistent storage)
+# All data is stored in S3, /tmp is only for temporary processing
+tmp_base_dir = "/tmp" if (os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT") or os.getenv("RAILWAY_ENVIRONMENT")) else "/tmp"
+os.makedirs(tmp_base_dir, exist_ok=True)
 
-os.makedirs(tmp_dump_dir, exist_ok=True)
-
-# Store dataset paths in memory (dataset_name -> dataset_path)
+# Legacy dataset_paths kept for backward compatibility during transition
+# New code should use job_tracking instead
 dataset_paths: Dict[str, str] = {}
-# Track ingestion status per dataset: "in_progress", "complete", or None (not started)
+# Map dataset_name -> latest job_id (for job-aware workflows)
+dataset_jobs: Dict[str, str] = {}
+# Legacy ingestion_status - will be replaced by job_tracking
 ingestion_status: Dict[str, str] = {}
 
 # Request/Response models
@@ -477,8 +478,16 @@ class DatasetInfo(BaseModel):
     dataset_name: str
 
 # Helper functions
+# Note: Supabase Storage functions below are kept for backward compatibility
+# but are no longer used in the upload flow. All uploads now go to S3.
+# Supabase is only used for user authentication (PostgreSQL + JWT).
+
 def _ensure_supabase_storage_config() -> None:
-    """Validate that Supabase Storage is configured."""
+    """Validate that Supabase Storage is configured.
+    
+    DEPRECATED: This function is no longer used in the upload flow.
+    All uploads now go to S3. Supabase is only used for authentication.
+    """
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise HTTPException(
             status_code=500,
@@ -580,8 +589,316 @@ def list_files_in_supabase(folder_path: str, bucket: str = "datasets") -> List[D
         raise HTTPException(status_code=500, detail=f"Error listing Supabase Storage files: {str(e)}")
 
 
+def upload_file_to_s3(
+    job_id: str,
+    file_path: str,
+    file_content: bytes,
+    dataset_name: Optional[str] = None,
+) -> str:
+    """Upload a single file to S3 using job-based isolation.
+    
+    Args:
+        job_id: Unique job identifier for isolation
+        file_path: Relative path within the dataset (e.g., "data/chunk-0/file.parquet")
+        file_content: File content as bytes
+    
+    Returns:
+        S3 key where the file was uploaded
+    """
+    # S3 structure: s3://{bucket}/jobs/{job_id}/{file_path}
+    s3_key = f"jobs/{job_id}/{file_path}".replace("\\", "/")
+    
+    content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    metadata = {"job_id": job_id}
+    if dataset_name:
+        metadata["dataset_name"] = dataset_name
+
+    try:
+        s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=file_content,
+            ContentType=content_type,
+            Metadata=metadata,
+        )
+        print(f"Uploaded to S3: s3://{S3_BUCKET}/{s3_key}")
+        return s3_key
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error uploading to S3: {str(e)}"
+        )
+
+
+def download_dataset_from_s3(job_id: str, local_path: Path) -> Path:
+    """Download entire dataset from S3 to local temporary directory.
+    
+    Args:
+        job_id: Job identifier
+        local_path: Local directory to download files to
+    
+    Returns:
+        Path to the downloaded dataset directory
+    """
+    s3_prefix = f"jobs/{job_id}/"
+    
+    try:
+        # Create local directory
+        local_path.mkdir(parents=True, exist_ok=True)
+        
+        # List all objects with the job prefix
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=s3_prefix)
+        
+        files_downloaded = 0
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+            for obj in page['Contents']:
+                s3_key = obj['Key']
+                # Get relative path by removing the prefix
+                relative_path = s3_key[len(s3_prefix):]
+                if not relative_path:
+                    continue
+                
+                local_file_path = local_path / relative_path
+                local_file_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Download file
+                s3.download_file(S3_BUCKET, s3_key, str(local_file_path))
+                files_downloaded += 1
+        
+        print(f"Downloaded {files_downloaded} files from S3 for job {job_id}")
+        return local_path
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading dataset from S3: {str(e)}"
+        )
+
+
+def cleanup_local_temp_directory(local_path: Path) -> None:
+    """Clean up temporary local directory after processing.
+    
+    Args:
+        local_path: Path to the temporary directory to remove
+    """
+    try:
+        if local_path.exists() and local_path.is_dir():
+            shutil.rmtree(local_path)
+            print(f"Cleaned up temporary directory: {local_path}")
+    except Exception as e:
+        print(f"Warning: Could not clean up {local_path}: {e}")
+
+
+def start_job_ingestion(job_id: str, dataset_name: str) -> None:
+    """Start ingestion for a job in a background thread.
+
+    This uses ephemeral /tmp storage only and cleans up after processing.
+    """
+    def run_full_ingestion():
+        """Run both basic ingestion and full pipeline in background.
+        Downloads from S3, processes in /tmp, then cleans up.
+        """
+        try:
+            # Update job status
+            job_tracking[job_id]["status"] = "processing"
+            job_tracking[job_id]["updated_at"] = datetime.utcnow().isoformat()
+
+            # Create ephemeral temporary directory for this job
+            temp_dir = Path(tmp_base_dir) / f"job_{job_id}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Created temporary directory for processing: {temp_dir}")
+
+            try:
+                # Download dataset from S3 to temporary directory
+                print(f"Downloading dataset from S3 for job {job_id}...")
+                dataset_local_path = download_dataset_from_s3(job_id, temp_dir)
+                print(f"Downloaded dataset to: {dataset_local_path}")
+
+                # Find scripts/ folder - check multiple locations
+                scripts_in_current = current_dir / "scripts"  # webapp-backend/scripts/ (copied for Railway)
+                scripts_parent = current_dir.parent  # demo/ares-platform/
+                scripts_in_parent = scripts_parent / "scripts"  # demo/ares-platform/scripts/
+
+                # Prefer scripts in current directory (webapp-backend/scripts/) for Railway deployments
+                if scripts_in_current.exists() and scripts_in_current.is_dir():
+                    if str(current_dir) not in sys.path:
+                        sys.path.insert(0, str(current_dir))
+                        print(f"Using scripts from current directory: {scripts_in_current}")
+                elif scripts_in_parent.exists() and scripts_in_parent.is_dir():
+                    # Fallback: scripts in parent directory (full repo structure)
+                    if str(scripts_parent) not in sys.path:
+                        sys.path.insert(0, str(scripts_parent))
+                    print(f"Using scripts from parent directory: {scripts_in_parent}")
+                elif str(project_root) not in sys.path:
+                    # Last resort: try project_root
+                    sys.path.insert(0, str(project_root))
+                    print(f"Using project_root: {project_root}")
+
+                # Run basic ingestion first
+                from scripts.ingest_lerobot_dataset import ingest_dataset
+                count = ingest_dataset(str(dataset_local_path), None, dataset_name)
+                print(f"Basic ingestion completed: {count} episodes")
+
+                # Then run the full ingestion pipeline
+                run_ingestion_for_dataset(dataset_name, str(dataset_local_path), dataset_name)
+
+                # Mark job as complete
+                job_tracking[job_id]["status"] = "complete"
+                job_tracking[job_id]["updated_at"] = datetime.utcnow().isoformat()
+                ingestion_status[dataset_name] = "complete"
+                print(f"Job {job_id} completed successfully")
+
+            finally:
+                # Always clean up temporary directory after processing
+                print(f"Cleaning up temporary directory for job {job_id}...")
+                cleanup_local_temp_directory(temp_dir)
+
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            print(f"Error in background ingestion for job {job_id}: {error_trace}")
+            job_tracking[job_id]["status"] = "failed"
+            job_tracking[job_id]["error"] = str(e)
+            job_tracking[job_id]["updated_at"] = datetime.utcnow().isoformat()
+            ingestion_status[dataset_name] = "failed"
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, run_full_ingestion)
+
+
+def get_s3_path_for_job(job_id: str) -> str:
+    """Get the S3 path for a job.
+    
+    Args:
+        job_id: Job identifier
+    
+    Returns:
+        S3 URI (e.g., "s3://bucket/jobs/job_id/")
+    """
+    return f"s3://{S3_BUCKET}/jobs/{job_id}/"
+
+
+def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
+    """Parse an S3 URI into bucket and prefix."""
+    if not s3_uri.startswith("s3://"):
+        raise ValueError(f"Invalid S3 URI: {s3_uri}")
+    path = s3_uri[5:]
+    parts = path.split("/", 1)
+    bucket = parts[0]
+    prefix = parts[1] if len(parts) > 1 else ""
+    if prefix and not prefix.endswith("/"):
+        prefix = f"{prefix}/"
+    return bucket, prefix
+
+
+def get_job_id_from_s3_path(s3_uri: str) -> str:
+    """Extract job_id from an S3 URI with required structure."""
+    _, prefix = parse_s3_uri(s3_uri)
+    parts = [p for p in prefix.split("/") if p]
+    if len(parts) < 2 or parts[0] != "jobs":
+        raise ValueError(
+            "S3 path must start with s3://{bucket}/jobs/{job_id}/"
+        )
+    return parts[1]
+
+
+def list_s3_keys(bucket: str, prefix: str) -> List[str]:
+    """List all S3 keys under a prefix."""
+    keys: List[str] = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            keys.append(key)
+    return keys
+
+
+def list_s3_video_keys(bucket: str, prefix: str) -> List[str]:
+    """List video files under the dataset videos/ prefix."""
+    video_extensions = (".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".m4v")
+    videos_prefix = f"{prefix}videos/"
+    keys = list_s3_keys(bucket, videos_prefix)
+    return [k for k in keys if k.lower().endswith(video_extensions)]
+
+
+def delete_s3_objects(bucket: str, keys: List[str]) -> None:
+    """Delete a list of S3 objects (best-effort cleanup)."""
+    if not keys:
+        return
+    # S3 delete_objects supports up to 1000 keys per request
+    for i in range(0, len(keys), 1000):
+        chunk = keys[i:i + 1000]
+        try:
+            s3.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": [{"Key": key} for key in chunk]},
+            )
+        except Exception as e:
+            print(f"Warning: Failed to delete S3 objects: {e}")
+
+
+def load_dataset_info_from_s3(s3_uri: str) -> Optional[Dict[str, Any]]:
+    """Load dataset info.json from S3."""
+    bucket, prefix = parse_s3_uri(s3_uri)
+    key = f"{prefix}meta/info.json"
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "NoSuchKey":
+            return None
+        raise
+
+
+def count_episodes_from_s3(s3_uri: str) -> int:
+    """Count episodes from S3 by listing videos or parquet files."""
+    bucket, prefix = parse_s3_uri(s3_uri)
+    video_keys = list_s3_video_keys(bucket, prefix)
+    if video_keys:
+        return len(video_keys)
+
+    # Fallback: count from parquet files in data/ if videos are missing
+    data_prefix = f"{prefix}data/"
+    parquet_keys = [k for k in list_s3_keys(bucket, data_prefix) if k.endswith(".parquet")]
+    if not parquet_keys:
+        return 0
+
+    all_episode_indices: set[int] = set()
+    for key in parquet_keys:
+        try:
+            obj = s3.get_object(Bucket=bucket, Key=key)
+            df = pd.read_parquet(io.BytesIO(obj["Body"].read()))
+            if "episode_index" in df.columns:
+                all_episode_indices.update(df["episode_index"].unique())
+        except Exception as e:
+            print(f"Error reading parquet {key}: {e}")
+            continue
+    return len(all_episode_indices)
+
+
+def generate_presigned_url(bucket: str, key: str, expires_in: int = 3600) -> str:
+    """Generate a presigned URL for an S3 object."""
+    try:
+        return s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=expires_in,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating download URL: {str(e)}")
+
+
 def upload_folder_to_s3(local_folder_path: str, bucket_name: str, s3_prefix: str = "") -> None:
-    """Upload all files in a folder to S3."""
+    """Upload all files in a folder to S3.
+    
+    Args:
+        local_folder_path: Local directory path to upload
+        bucket_name: S3 bucket name
+        s3_prefix: S3 key prefix (e.g., "input_data/dataset/prompts/")
+    """
     for root, dirs, files in os.walk(local_folder_path):
         for file in files:
             local_file_path = os.path.join(root, file)
@@ -958,7 +1275,11 @@ async def upload_dataset(
     environment: str = Form(""),
     axes: str = Form("[]")
 ):
-    """Upload a dataset folder from local files."""
+    """Upload a dataset folder to S3 with job-based isolation.
+    
+    All files are stored in S3 at: s3://{bucket}/jobs/{job_id}/
+    Each upload gets a unique job_id for complete isolation.
+    """
     try:
         print(f"Received upload request for dataset: {dataset_name}")
         print(f"Number of files received: {len(files) if files else 0}")
@@ -969,24 +1290,26 @@ async def upload_dataset(
                 detail="No files were uploaded. Please select a folder to upload."
             )
         
-        # Use Supabase Storage if available, otherwise fall back to local filesystem.
-        use_supabase = SUPABASE_ENABLED
-        upload_dir = None
+        # Generate unique job_id for this upload (first isolating boundary)
+        job_id = str(uuid.uuid4())
+        s3_path = get_s3_path_for_job(job_id)
+        print(f"Created job {job_id} for dataset {dataset_name}")
+        print(f"S3 path: {s3_path}")
         
-        if not use_supabase:
-            # Fallback to local filesystem
-            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-                upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
-            else:
-                upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Using local filesystem, upload directory: {upload_dir}")
-        else:
-            print(f"Using Supabase Storage for dataset: {dataset_name}")
+        # Initialize job tracking
+        job_tracking[job_id] = {
+            "status": "uploading",
+            "dataset_name": dataset_name,
+            "s3_path": s3_path,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "files_uploaded": 0,
+            "total_files": len(files)
+        }
         
         # Detect root folder name from first file's path
         # webkitRelativePath includes the root folder name (e.g., "my_dataset/data/file.parquet")
-        # We need to strip it so files are saved directly under dataset_name
+        # We need to strip it so files are saved directly under job_id
         root_folder_prefix = None
         first_file_path = None
         for file in files:
@@ -998,8 +1321,11 @@ async def upload_dataset(
                     print(f"Detected root folder prefix: {root_folder_prefix}")
                 break
         
-        # Save all uploaded files preserving directory structure
-        files_saved = 0
+        # Upload all files to S3 preserving directory structure
+        files_uploaded = 0
+        uploaded_file_paths: List[str] = []
+        uploaded_s3_keys: List[str] = []
+        
         for idx, file in enumerate(files):
             try:
                 # Get the relative path from the file's path (if available)
@@ -1021,111 +1347,103 @@ async def upload_dataset(
                 # Read file content
                 content = await file.read()
                 
-                if use_supabase:
-                    # Upload to Supabase Storage
-                    supabase_path = f"{dataset_name}/{file_path}"
-                    upload_file_to_supabase(supabase_path, content, bucket="datasets")
-                    print(f"Uploaded to Supabase Storage: {supabase_path}")
-                else:
-                    # Save to local filesystem
-                    full_path = upload_dir / file_path
-                    full_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(full_path, "wb") as f:
-                        f.write(content)
-                    print(f"Saved file: {full_path}")
+                # Upload to S3: s3://bucket/jobs/job_id/file_path
+                s3_key = upload_file_to_s3(job_id, file_path, content, dataset_name)
+                uploaded_file_paths.append(file_path)
+                uploaded_s3_keys.append(s3_key)
+                files_uploaded += 1
                 
-                files_saved += 1
+                # Update job tracking
+                job_tracking[job_id]["files_uploaded"] = files_uploaded
+                job_tracking[job_id]["updated_at"] = datetime.utcnow().isoformat()
+                
             except Exception as file_error:
                 import traceback
                 error_trace = traceback.format_exc()
-                print(f"Error saving file {file.filename if file.filename else 'unknown'}: {error_trace}")
+                print(f"Error uploading file {file.filename if file.filename else 'unknown'}: {error_trace}")
+                # Mark job as failed
+                job_tracking[job_id]["status"] = "failed"
+                job_tracking[job_id]["error"] = f"Error uploading file: {str(file_error)}"
+                # Best-effort cleanup of already uploaded objects
+                delete_s3_objects(S3_BUCKET, uploaded_s3_keys)
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Error saving file {file.filename if file.filename else 'unknown'}: {str(file_error)}"
+                    detail=f"Error uploading file {file.filename if file.filename else 'unknown'}: {str(file_error)}"
                 )
         
-        if files_saved == 0:
+        if files_uploaded == 0:
+            job_tracking[job_id]["status"] = "failed"
+            job_tracking[job_id]["error"] = "No files were uploaded"
             raise HTTPException(
                 status_code=400,
                 detail="No files were uploaded or saved."
             )
         
-        # Validate dataset structure (only if using local filesystem)
-        if not use_supabase:
-            if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists() or not (upload_dir / "videos").exists():
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
-                )
-        else:
-            # For Supabase, create a temporary directory for ingestion to work with
-            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-                upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
-            else:
-                upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Created temporary upload directory for ingestion: {upload_dir}")
+        # Validate dataset structure by checking for required folders in uploaded paths
+        has_data = any("data/" in path for path in uploaded_file_paths)
+        has_meta = any("meta/" in path for path in uploaded_file_paths)
+        has_videos = any("videos/" in path for path in uploaded_file_paths)
         
-        # Store the dataset path for later use
-        dataset_paths[dataset_name] = str(upload_dir)
+        if not (has_data and has_meta and has_videos):
+            job_tracking[job_id]["status"] = "failed"
+            job_tracking[job_id]["error"] = "Invalid dataset structure"
+            # Clean up S3 objects for invalid uploads
+            delete_s3_objects(S3_BUCKET, uploaded_s3_keys)
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
+            )
         
-        # Mark ingestion as starting
+        # Update job status to ready for ingestion
+        job_tracking[job_id]["status"] = "in_progress"
+        job_tracking[job_id]["updated_at"] = datetime.utcnow().isoformat()
+        
+        # Store job_id for backward compatibility (legacy code may still use dataset_name)
+        dataset_paths[dataset_name] = s3_path
+        dataset_jobs[dataset_name] = job_id
         ingestion_status[dataset_name] = "in_progress"
+
+        # Write a manifest for the job (best practice for traceability)
+        try:
+            manifest = {
+                "job_id": job_id,
+                "dataset_name": dataset_name,
+                "s3_path": s3_path,
+                "created_at": job_tracking[job_id]["created_at"],
+                "files_uploaded": files_uploaded,
+                "has_data": has_data,
+                "has_meta": has_meta,
+                "has_videos": has_videos,
+                "environment": environment,
+                "axes": axes,
+            }
+            manifest_key = f"jobs/{job_id}/manifest.json"
+            s3.put_object(
+                Bucket=S3_BUCKET,
+                Key=manifest_key,
+                Body=json.dumps(manifest).encode("utf-8"),
+                ContentType="application/json",
+            )
+        except Exception as e:
+            print(f"Warning: could not write manifest for job {job_id}: {e}")
         
         # Return immediately - run ingestion in background
-        print(f"Files uploaded successfully. Starting background ingestion for dataset: {dataset_name}")
+        print(f"Files uploaded successfully to S3. Starting background ingestion for job {job_id}")
         try:
-            loop = asyncio.get_running_loop()
-            
-            def run_full_ingestion():
-                """Run both basic ingestion and full pipeline in background."""
-                try:
-                    # Find scripts/ folder - check multiple locations
-                    current_dir = Path(__file__).parent  # webapp-backend/
-                    scripts_in_current = current_dir / "scripts"  # webapp-backend/scripts/ (copied for Railway)
-                    scripts_parent = current_dir.parent  # demo/ares-platform/
-                    scripts_in_parent = scripts_parent / "scripts"  # demo/ares-platform/scripts/
-                    
-                    # Prefer scripts in current directory (webapp-backend/scripts/) for Railway deployments
-                    if scripts_in_current.exists() and scripts_in_current.is_dir():
-                        if str(current_dir) not in sys.path:
-                            sys.path.insert(0, str(current_dir))
-                            print(f"Using scripts from current directory: {scripts_in_current}")
-                    elif scripts_in_parent.exists() and scripts_in_parent.is_dir():
-                        # Fallback: scripts in parent directory (full repo structure)
-                        if str(scripts_parent) not in sys.path:
-                            sys.path.insert(0, str(scripts_parent))
-                        print(f"Using scripts from parent directory: {scripts_in_parent}")
-                    elif str(project_root) not in sys.path:
-                        # Last resort: try project_root
-                        sys.path.insert(0, str(project_root))
-                        print(f"Using project_root: {project_root}")
-                    
-                    # Run basic ingestion first
-                    from scripts.ingest_lerobot_dataset import ingest_dataset
-                    count = ingest_dataset(str(upload_dir), None, dataset_name)
-                    print(f"Basic ingestion completed: {count} episodes")
-                    
-                    # Then run the full ingestion pipeline
-                    run_ingestion_for_dataset(dataset_name, str(upload_dir), dataset_name)
-                except Exception as e:
-                    import traceback
-                    error_trace = traceback.format_exc()
-                    print(f"Error in background ingestion for {dataset_name}: {error_trace}")
-                    ingestion_status[dataset_name] = "failed"
-            
-            # Fire-and-forget: do not await, so upload can succeed immediately
-            loop.run_in_executor(None, run_full_ingestion)
+            start_job_ingestion(job_id, dataset_name)
         except Exception as ingestion_error:
-            import traceback
             error_trace = traceback.format_exc()
-            print(f"Error scheduling ingestion for {dataset_name}: {error_trace}")
+            print(f"Error scheduling ingestion for job {job_id}: {error_trace}")
+            job_tracking[job_id]["status"] = "failed"
+            job_tracking[job_id]["error"] = str(ingestion_error)
+            job_tracking[job_id]["updated_at"] = datetime.utcnow().isoformat()
             ingestion_status[dataset_name] = "failed"
         
         return {
             "success": True,
+            "job_id": job_id,
             "dataset_name": dataset_name,
-            "dataset_path": str(upload_dir),
+            "s3_path": s3_path,
             "message": "Upload successful. Ingestion is running in the background."
         }
     except HTTPException:
@@ -1139,9 +1457,42 @@ async def upload_dataset(
             content={"detail": f"Error uploading dataset: {str(e)}"}
         )
 
+@app.get("/api/jobs/{job_id}/status")
+async def get_job_status(job_id: str):
+    """Get the status of a specific job by job_id."""
+    if job_id not in job_tracking:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Job {job_id} not found"
+        )
+    
+    job_info = job_tracking[job_id]
+    return {
+        "job_id": job_id,
+        "status": job_info["status"],
+        "dataset_name": job_info["dataset_name"],
+        "s3_path": job_info["s3_path"],
+        "created_at": job_info["created_at"],
+        "updated_at": job_info["updated_at"],
+        "files_uploaded": job_info.get("files_uploaded", 0),
+        "total_files": job_info.get("total_files", 0),
+        "error": job_info.get("error"),
+        "message": {
+            "uploading": "Files are being uploaded to S3...",
+            "in_progress": "Upload complete. Ingestion is in progress...",
+            "processing": "Dataset downloaded from S3. Processing...",
+            "complete": "Job completed successfully",
+            "failed": f"Job failed: {job_info.get('error', 'Unknown error')}"
+        }.get(job_info["status"], "Unknown status")
+    }
+
 @app.get("/api/datasets/{dataset_name}/ingestion-status")
 async def get_ingestion_status(dataset_name: str):
-    """Get the ingestion status for a dataset."""
+    """Get the ingestion status for a dataset (legacy endpoint).
+    
+    This endpoint is kept for backward compatibility.
+    For new code, use /api/jobs/{job_id}/status instead.
+    """
     status = ingestion_status.get(dataset_name)
     if status is None:
         return {"status": "not_started", "message": "Ingestion has not been started for this dataset"}
@@ -1156,54 +1507,73 @@ async def get_ingestion_status(dataset_name: str):
 
 @app.post("/api/datasets/load")
 async def load_dataset(request: DatasetLoadRequest):
-    """Load a dataset from a local path or S3."""
+    """Register an existing dataset from S3 (no local paths)."""
     try:
-        if request.is_s3:
-            # Download from S3 to temporary directory
-            temp_dir = project_root / "data" / "temp_datasets" / request.dataset_name
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            
-            dataset_path = download_from_s3(request.dataset_path, temp_dir)
-        else:
-            dataset_path = Path(request.dataset_path)
-            if not dataset_path.exists():
-                raise HTTPException(status_code=400, detail=f"Path does not exist: {request.dataset_path}")
-        
-        if not (dataset_path / "data").exists() or not (dataset_path / "meta").exists() or not (dataset_path / "videos").exists():
+        if not request.is_s3:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
+                detail="Local dataset paths are not supported. Please use an S3 path."
             )
-        
-        # Run basic ingestion (no database creation)
-        # Ensure project root is in path
-        if str(project_root) not in sys.path:
-            sys.path.insert(0, str(project_root))
-        
-        from scripts.ingest_lerobot_dataset import ingest_dataset
-        # Using None for engine_url since database creation is skipped
-        count = ingest_dataset(str(dataset_path), None, request.dataset_name)
-        
-        # Store the dataset path for later use
-        dataset_paths[request.dataset_name] = str(dataset_path)
-        
-        # Run the full ingestion pipeline to populate robot_data.db in the background.
-        # This is best-effort for plots; core dataset info and previews do not depend on it.
-        print(f"Starting background ingestion pipeline for loaded dataset: {request.dataset_name}")
+
+        # Validate and normalize S3 path
+        s3_path = request.dataset_path
         try:
-            loop = asyncio.get_running_loop()
-            # Fire-and-forget: do not await, so load can succeed regardless of ingestion outcome.
-            loop.run_in_executor(None, run_ingestion_for_dataset, request.dataset_name, str(dataset_path), request.dataset_name)
+            bucket, prefix = parse_s3_uri(s3_path)
+            job_id = get_job_id_from_s3_path(s3_path)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        if bucket != S3_BUCKET:
+            raise HTTPException(
+                status_code=400,
+                detail=f"S3 bucket mismatch. Expected {S3_BUCKET}, got {bucket}."
+            )
+        canonical_s3_path = get_s3_path_for_job(job_id)
+
+        # Validate dataset structure by checking required prefixes
+        has_data = bool(list_s3_keys(bucket, f"{prefix}data/"))
+        has_meta = bool(list_s3_keys(bucket, f"{prefix}meta/"))
+        has_videos = bool(list_s3_video_keys(bucket, prefix))
+        if not (has_data and has_meta and has_videos):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid LeRobot dataset structure in S3. Must include 'data/', 'meta/', and 'videos/'."
+            )
+
+        # Register dataset for downstream API usage
+        dataset_paths[request.dataset_name] = canonical_s3_path
+        dataset_jobs[request.dataset_name] = job_id
+        ingestion_status[request.dataset_name] = "in_progress"
+
+        if job_id not in job_tracking:
+            job_tracking[job_id] = {
+                "status": "in_progress",
+                "dataset_name": request.dataset_name,
+                "s3_path": canonical_s3_path,
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "files_uploaded": 0,
+                "total_files": 0,
+            }
+
+        # Start ingestion in the background
+        print(f"Starting background ingestion pipeline for loaded dataset job {job_id}")
+        try:
+            start_job_ingestion(job_id, request.dataset_name)
         except Exception as ingestion_error:
-            import traceback
             error_trace = traceback.format_exc()
-            print(f"Error scheduling ingestion for {request.dataset_name}: {error_trace}")
-        
+            print(f"Error scheduling ingestion for job {job_id}: {error_trace}")
+            job_tracking[job_id]["status"] = "failed"
+            job_tracking[job_id]["error"] = str(ingestion_error)
+            job_tracking[job_id]["updated_at"] = datetime.utcnow().isoformat()
+            ingestion_status[request.dataset_name] = "failed"
+
         return {
             "success": True,
             "dataset_name": request.dataset_name,
-            "dataset_path": str(dataset_path),
-            "episodes_ingested": count
+            "job_id": job_id,
+            "s3_path": canonical_s3_path,
+            "message": "Dataset registered. Ingestion is running in the background."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading dataset: {str(e)}")
@@ -1217,18 +1587,23 @@ async def get_dataset_info(dataset_name: str):
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
         dataset_path = dataset_paths[dataset_name]
-        dataset_info = load_dataset_info(dataset_path)
-        
-        # Get episode count from info.json first, fallback to counting parquet files
-        if dataset_info and 'total_episodes' in dataset_info:
-            total_episodes = dataset_info['total_episodes']
+
+        if isinstance(dataset_path, str) and dataset_path.startswith("s3://"):
+            dataset_info = load_dataset_info_from_s3(dataset_path)
+            # Prefer info.json for counts; fallback to S3 listing
+            if dataset_info and "total_episodes" in dataset_info:
+                total_episodes = dataset_info["total_episodes"]
+            else:
+                total_episodes = count_episodes_from_s3(dataset_path)
+            robot_type = dataset_info.get("robot_type", "N/A") if dataset_info else "N/A"
         else:
-            # Only count from parquet if not in info.json
-            total_episodes = count_episodes_from_parquet(dataset_path)
-        
-        robot_type = "N/A"
-        if dataset_info and 'robot_type' in dataset_info:
-            robot_type = dataset_info['robot_type']
+            # Backward compatibility for local paths
+            dataset_info = load_dataset_info(dataset_path)
+            if dataset_info and "total_episodes" in dataset_info:
+                total_episodes = dataset_info["total_episodes"]
+            else:
+                total_episodes = count_episodes_from_parquet(dataset_path)
+            robot_type = dataset_info.get("robot_type", "N/A") if dataset_info else "N/A"
         
         return {
             "dataset_name": dataset_name,
@@ -1247,35 +1622,53 @@ async def get_dataset_data(dataset_name: str):
         if dataset_name not in dataset_paths:
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
-        # Base dataset path
         dataset_path = dataset_paths[dataset_name]
-        dataset_path_obj = Path(dataset_path)
 
-        # Videos directory: each video file is treated as one episode
-        videos_dir = dataset_path_obj / "videos"
+        if isinstance(dataset_path, str) and dataset_path.startswith("s3://"):
+            bucket, prefix = parse_s3_uri(dataset_path)
+            video_keys = sorted(list_s3_video_keys(bucket, prefix))
 
-        if not videos_dir.exists():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Videos directory not found for dataset '{dataset_name}'"
+            if not video_keys:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No videos found in S3 for dataset '{dataset_name}'"
+                )
+
+            episodes = []
+            for idx, _ in enumerate(video_keys):
+                episodes.append({
+                    "id": f"episode_{idx}",
+                    "episode_index": idx,
+                    "length": None,
+                    "video_url": f"/api/datasets/{dataset_name}/videos/{idx}",
+                    "task_language_instruction": None,
+                })
+        else:
+            # Backward compatibility for local paths
+            dataset_path_obj = Path(dataset_path)
+            videos_dir = dataset_path_obj / "videos"
+
+            if not videos_dir.exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Videos directory not found for dataset '{dataset_name}'"
+                )
+
+            video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+            video_files = sorted(
+                f for f in videos_dir.iterdir()
+                if f.is_file() and f.suffix.lower() in video_extensions
             )
 
-        # Find all video files
-        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
-        video_files = sorted(
-            f for f in videos_dir.iterdir()
-            if f.is_file() and f.suffix.lower() in video_extensions
-        )
-
-        episodes = []
-        for idx, video_path in enumerate(video_files):
-            episodes.append({
-                "id": f"episode_{idx}",
-                "episode_index": idx,
-                "length": None,  # length (timesteps) not derived here
-                "video_url": f"/api/datasets/{dataset_name}/videos/{idx}",
-                "task_language_instruction": None,  # not currently mapped from parquet
-            })
+            episodes = []
+            for idx, _ in enumerate(video_files):
+                episodes.append({
+                    "id": f"episode_{idx}",
+                    "episode_index": idx,
+                    "length": None,
+                    "video_url": f"/api/datasets/{dataset_name}/videos/{idx}",
+                    "task_language_instruction": None,
+                })
 
         return {
             "dataset_name": dataset_name,
@@ -1315,37 +1708,51 @@ async def get_dataset_distributions(dataset_name: str):
 async def run_augmentation(request: AugmentationRequest):
     """Run Cosmos augmentation on a dataset."""
     try:
-        import uuid
-        from datetime import datetime
         from generate_prompt import generate_prompt_variations, generate_video_descriptions_with_vlm
         from ares.models.shortcuts import get_vlm
-        
+
         # Get VLM instance (same as used in ingestion)
-        # Using Gemini instead of OpenAI to avoid quota limits
-        vlm_name = "gpt-4o"  # Changed from "gpt-4o" to match ingestion and avoid quota limits
+        vlm_name = "gpt-4o"
         vlm = get_vlm(vlm_name)
-        
-        # Get video directory path from the dataset's own videos folder
+
         if request.dataset_name not in dataset_paths:
             raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset_name}' not found")
 
-        dataset_path = Path(dataset_paths[request.dataset_name])
-        video_dir = dataset_path / "videos"
+        dataset_path = dataset_paths[request.dataset_name]
+        if not isinstance(dataset_path, str) or not dataset_path.startswith("s3://"):
+            raise HTTPException(status_code=400, detail="Dataset must be stored in S3 to run augmentation.")
 
-        if not video_dir.exists():
+        bucket, prefix = parse_s3_uri(dataset_path)
+        job_id = dataset_jobs.get(request.dataset_name) or get_job_id_from_s3_path(dataset_path)
+
+        # Download videos to ephemeral temp dir for processing (no persistent storage)
+        video_keys = sorted(list_s3_video_keys(bucket, prefix))
+        if not video_keys:
             raise HTTPException(
                 status_code=404,
-                detail=f"Video directory not found for dataset '{request.dataset_name}'"
+                detail=f"No videos found for dataset '{request.dataset_name}' in S3"
             )
-        
-        # Generate video descriptions using the same VLM as ingestion
-        print(f"Generating video descriptions for dataset: {request.dataset_name} using {vlm_name}")
-        descriptions = await generate_video_descriptions_with_vlm(
-            video_dir,
-            vlm,
-            task_description=request.task_description if request.task_description else None
-        )
-        
+
+        temp_dir = Path(tmp_base_dir) / f"augment_{job_id}_{uuid.uuid4().hex[:8]}"
+        local_videos_dir = temp_dir / "videos"
+        local_videos_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            for key in video_keys:
+                filename = Path(key).name
+                local_path = local_videos_dir / filename
+                s3.download_file(bucket, key, str(local_path))
+
+            # Generate video descriptions using the same VLM as ingestion
+            print(f"Generating video descriptions for dataset: {request.dataset_name} using {vlm_name}")
+            descriptions = await generate_video_descriptions_with_vlm(
+                local_videos_dir,
+                vlm,
+                task_description=request.task_description if request.task_description else None
+            )
+        finally:
+            cleanup_local_temp_directory(temp_dir)
+
         if not descriptions or all(not d for d in descriptions):
             raise HTTPException(
                 status_code=400,
@@ -1367,85 +1774,38 @@ async def run_augmentation(request: AugmentationRequest):
         
         print(f"Generated {len(variations)} prompt variations")
         
-        # Create directory path for saving prompt variations
+        # Create directory path for saving prompt variations (S3 only)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         prompt_folder_name = f"{timestamp}_{unique_id}"
         prompts_base_path = f"prompts/{request.dataset_name}/{prompt_folder_name}"
-        
-        # Use Supabase Storage if available, otherwise fall back to local filesystem
-        use_supabase = supabase is not None
-        prompts_dir = None
-        
-        if not use_supabase:
-            # Fallback to local filesystem
-            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-                prompts_dir = Path("/tmp") / "prompts" / request.dataset_name / prompt_folder_name
-            else:
-                prompts_dir = project_root / "data" / "prompts" / request.dataset_name / prompt_folder_name
-            prompts_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Get list of video files in sorted order (same order as descriptions were generated)
-        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
-        video_files = sorted([
-            f for f in video_dir.iterdir() 
-            if f.is_file() and f.suffix.lower() in video_extensions
-        ])
-        
-        # Save each variation to a .txt file and build metadata
+
+        # Save each variation to S3 and build metadata
         saved_files = []
         metadata = []
         for idx, (axis_changed, variation_text) in enumerate(variations):
             filename = f"variation_{idx+1:04d}.txt"
-            
-            if use_supabase:
-                # Upload to Supabase Storage
-                supabase_file_path = f"{prompts_base_path}/{filename}"
-                upload_file_to_supabase(supabase_file_path, variation_text.encode('utf-8'), bucket="datasets")
-                saved_files.append(supabase_file_path)
-                txt_file_path = supabase_file_path
-                print(f"Uploaded variation {idx+1} to Supabase: {supabase_file_path}")
+            file_path = f"{prompts_base_path}/{filename}"
+            s3_key = upload_file_to_s3(job_id, file_path, variation_text.encode("utf-8"), request.dataset_name)
+            saved_files.append(f"s3://{S3_BUCKET}/{s3_key}")
+
+            # Store relative path from dataset root for S3 structure
+            if idx < len(video_keys):
+                video_relative_path = f"videos/{Path(video_keys[idx]).name}"
             else:
-                # Save to local filesystem
-                file_path = prompts_dir / filename
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(variation_text)
-                saved_files.append(str(file_path.relative_to(project_root)))
-                txt_file_path = f"prompts/{request.dataset_name}/{prompt_folder_name}/{filename}"
-            
-            # Get corresponding video path (same index as description)
-            if idx < len(video_files):
-                video_path = video_files[idx]
-                # Store relative path from dataset root for S3 structure
-                # Format: videos/episode_XX.mp4 (relative to dataset directory)
-                video_relative_path = video_path.relative_to(dataset_path)
-            else:
-                # Fallback if mismatch (shouldn't happen, but handle gracefully)
-                video_relative_path = video_files[0].relative_to(dataset_path) if video_files else ""
-            
+                video_relative_path = f"videos/{Path(video_keys[0]).name}" if video_keys else ""
+
             metadata.append({
-                "video_path": str(video_relative_path),
-                "txt_file_path": txt_file_path,
+                "video_path": video_relative_path,
+                "txt_file_path": file_path,
                 "axis": axis_changed
             })
             print(f"Saved variation {idx+1} (video: {video_relative_path}, axis: {axis_changed})")
-        
-        # Save metadata JSON file
-        if use_supabase:
-            metadata_file_path = f"{prompts_base_path}/metadata.json"
-            metadata_json = json.dumps(metadata, indent=2)
-            upload_file_to_supabase(metadata_file_path, metadata_json.encode('utf-8'), bucket="datasets")
-            print(f"Uploaded metadata to Supabase: {metadata_file_path}")
-        else:
-            metadata_file = prompts_dir / "metadata.json"
-            with open(metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2)
-            print(f"Saved metadata to {metadata_file}")
-            
-            # Upload entire folder to S3 (only if not using Supabase)
-            s3_prefix = f"input_data/{request.dataset_name}/prompts/{timestamp}_{unique_id}"
-            print(f"Uploading prompt variations folder to S3: {s3_prefix}")
-            upload_folder_to_s3(str(prompts_dir), S3_BUCKET, s3_prefix)
+
+        # Save metadata JSON file to S3
+        metadata_file_path = f"{prompts_base_path}/metadata.json"
+        metadata_json = json.dumps(metadata, indent=2)
+        metadata_key = upload_file_to_s3(job_id, metadata_file_path, metadata_json.encode("utf-8"), request.dataset_name)
         
         return {
             "success": True,
@@ -1453,7 +1813,8 @@ async def run_augmentation(request: AugmentationRequest):
             "descriptions_count": len(descriptions),
             "variations_count": len(variations),
             "saved_files": saved_files,
-            "s3_prefix": s3_prefix,
+            "s3_prefix": f"s3://{S3_BUCKET}/jobs/{job_id}/{prompts_base_path}",
+            "metadata_path": f"s3://{S3_BUCKET}/{metadata_key}",
             "message": f"Generated {len(variations)} prompt variations and uploaded to S3"
         }
                 
@@ -1494,9 +1855,22 @@ async def get_episode_video(dataset_name: str, episode_index: int):
         if dataset_name not in dataset_paths:
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
-        # Serve from the dataset's own videos directory, using sorted video files
-        dataset_path = Path(dataset_paths[dataset_name])
-        videos_dir = dataset_path / "videos"
+        dataset_path = dataset_paths[dataset_name]
+
+        if isinstance(dataset_path, str) and dataset_path.startswith("s3://"):
+            bucket, prefix = parse_s3_uri(dataset_path)
+            video_keys = sorted(list_s3_video_keys(bucket, prefix))
+
+            if episode_index < 0 or episode_index >= len(video_keys):
+                raise HTTPException(status_code=404, detail=f"Video not found for episode {episode_index}")
+
+            video_key = video_keys[episode_index]
+            presigned_url = generate_presigned_url(bucket, video_key)
+            return RedirectResponse(url=presigned_url)
+
+        # Backward compatibility for local paths
+        dataset_path_obj = Path(dataset_path)
+        videos_dir = dataset_path_obj / "videos"
 
         if not videos_dir.exists():
             raise HTTPException(status_code=404, detail=f"Videos directory not found for dataset '{dataset_name}'")
@@ -1511,10 +1885,10 @@ async def get_episode_video(dataset_name: str, episode_index: int):
             raise HTTPException(status_code=404, detail=f"Video not found for episode {episode_index}")
 
         video_path = video_files[episode_index]
-        
+
         if not video_path.exists():
             raise HTTPException(status_code=404, detail=f"Video not found for episode {episode_index}")
-        
+
         return FileResponse(
             path=str(video_path),
             media_type="video/mp4",
