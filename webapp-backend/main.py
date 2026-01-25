@@ -19,7 +19,7 @@ import traceback
 import boto3
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, status
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, status, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -28,9 +28,20 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import requests
 from dotenv import load_dotenv
+import stripe
 
 
 load_dotenv()
+
+# Stripe configuration
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
+else:
+    print("Warning: STRIPE_SECRET_KEY not set. Payment processing will not work.")
 
 # Add project root and src/ to path so we can import the ares package
 # Railway root is webapp-backend, so check multiple locations for src/
@@ -232,6 +243,7 @@ class UserResponse(BaseModel):
     email: str
     first_name: str
     last_name: str
+    credits: str
     created_at: str
 
 class TokenResponse(BaseModel):
@@ -307,6 +319,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
                 email=user.email,
                 first_name=user.first_name,
                 last_name=user.last_name,
+                credits=user.credits or "1000",
                 created_at=user.created_at.isoformat() if user.created_at else ""
             )
         )
@@ -344,6 +357,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
                 email=user.email,
                 first_name=user.first_name,
                 last_name=user.last_name,
+                credits=user.credits or "1000",
                 created_at=user.created_at.isoformat() if user.created_at else ""
             )
         )
@@ -363,8 +377,294 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         email=current_user.email,
         first_name=current_user.first_name,
         last_name=current_user.last_name,
+        credits=current_user.credits or "1000",
         created_at=current_user.created_at.isoformat() if current_user.created_at else ""
     )
+
+# Billing Models
+class CreditsResponse(BaseModel):
+    credits: str
+
+class PurchaseCreditsRequest(BaseModel):
+    credits: int  # Number of credits to purchase
+
+class PurchaseCreditsResponse(BaseModel):
+    credits: str
+    amount_charged: float
+    credits_purchased: int
+    client_secret: Optional[str] = None  # Stripe PaymentIntent client secret
+    payment_intent_id: Optional[str] = None
+
+class ConfirmPaymentRequest(BaseModel):
+    payment_intent_id: str
+
+class DeductCreditsRequest(BaseModel):
+    credits: int  # Number of credits to deduct
+
+class DeductCreditsResponse(BaseModel):
+    credits: str
+    credits_deducted: int
+
+@app.get("/api/billing/credits", response_model=CreditsResponse)
+async def get_credits(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get current user's credit balance."""
+    return CreditsResponse(credits=current_user.credits or "1000")
+
+@app.post("/api/billing/purchase", response_model=PurchaseCreditsResponse)
+async def purchase_credits(
+    request: PurchaseCreditsRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a Stripe PaymentIntent for purchasing credits. Cost: $0.1 per credit."""
+    if request.credits <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Number of credits must be greater than 0"
+        )
+    
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stripe is not configured. Please set STRIPE_SECRET_KEY environment variable."
+        )
+    
+    # Calculate cost: $0.1 per credit
+    cost_per_credit = 0.1
+    amount_charged = request.credits * cost_per_credit
+    # Stripe amounts are in cents
+    amount_cents = int(amount_charged * 100)
+    
+    try:
+        # Create a Stripe PaymentIntent
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount_cents,
+            currency='usd',
+            metadata={
+                'user_id': current_user.id,
+                'user_email': current_user.email,
+                'credits': str(request.credits),
+                'amount_charged': str(amount_charged)
+            },
+            automatic_payment_methods={
+                'enabled': True,
+            },
+        )
+        
+        return PurchaseCreditsResponse(
+            credits=current_user.credits or "0",  # Return current credits (not updated yet)
+            amount_charged=amount_charged,
+            credits_purchased=request.credits,
+            client_secret=payment_intent.client_secret,
+            payment_intent_id=payment_intent.id
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stripe error: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating payment intent: {str(e)}"
+        )
+
+@app.post("/api/billing/confirm-payment")
+async def confirm_payment(
+    request: ConfirmPaymentRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Confirm payment and add credits to user account."""
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stripe is not configured."
+        )
+    
+    try:
+        # Retrieve the PaymentIntent to verify it was successful
+        payment_intent = stripe.PaymentIntent.retrieve(request.payment_intent_id)
+        
+        # Verify the payment belongs to the current user
+        if payment_intent.metadata.get('user_id') != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Payment intent does not belong to current user"
+            )
+        
+        # Check if payment was successful
+        if payment_intent.status != 'succeeded':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment not completed. Status: {payment_intent.status}"
+            )
+        
+        # Get credits from metadata
+        credits_to_add = int(payment_intent.metadata.get('credits', '0'))
+        
+        if credits_to_add <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid credits amount in payment intent"
+            )
+        
+        # Add credits to user account
+        current_credits = int(current_user.credits or "0")
+        new_credits = current_credits + credits_to_add
+        current_user.credits = str(new_credits)
+        db.commit()
+        db.refresh(current_user)
+        
+        return {
+            "success": True,
+            "credits": str(new_credits),
+            "credits_added": credits_to_add
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stripe error: {str(e)}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error confirming payment: {str(e)}"
+        )
+
+class InternalDeductCreditsRequest(BaseModel):
+    user_id: str
+    credits: int
+
+@app.post("/api/billing/deduct", response_model=DeductCreditsResponse)
+async def deduct_credits(
+    request: DeductCreditsRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Deduct credits from user account (used internally for video generation)."""
+    current_credits = int(current_user.credits or "0")
+    
+    if current_credits < request.credits:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Insufficient credits. You have {current_credits} credits but need {request.credits}."
+        )
+    
+    new_credits = current_credits - request.credits
+    current_user.credits = str(new_credits)
+    db.commit()
+    db.refresh(current_user)
+    
+    return DeductCreditsResponse(
+        credits=str(new_credits),
+        credits_deducted=request.credits
+    )
+
+@app.post("/api/billing/deduct-internal", response_model=DeductCreditsResponse)
+async def deduct_credits_internal(
+    request: InternalDeductCreditsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Internal endpoint for deducting credits (called from Cosmos server).
+    This endpoint does not require authentication but should only be called from trusted services.
+    In production, add IP whitelist or API key authentication.
+    """
+    user = db.query(User).filter(User.id == request.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User not found: {request.user_id}"
+        )
+    
+    current_credits = int(user.credits or "0")
+    
+    if current_credits < request.credits:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Insufficient credits. User has {current_credits} credits but needs {request.credits}."
+        )
+    
+    new_credits = current_credits - request.credits
+    user.credits = str(new_credits)
+    db.commit()
+    db.refresh(user)
+    
+    print(f"Deducted {request.credits} credits from user {request.user_id}. New balance: {new_credits}")
+    
+    return DeductCreditsResponse(
+        credits=str(new_credits),
+        credits_deducted=request.credits
+    )
+
+@app.post("/api/billing/webhook")
+async def stripe_webhook(request: Request):
+    """
+    Stripe webhook endpoint to handle payment events.
+    This should be called by Stripe when payment events occur.
+    Note: In production, configure this endpoint in Stripe Dashboard and set STRIPE_WEBHOOK_SECRET.
+    """
+    if not STRIPE_WEBHOOK_SECRET:
+        # If webhook secret not set, skip verification (for development only)
+        print("Warning: STRIPE_WEBHOOK_SECRET not set. Webhook verification disabled.")
+        payload = await request.body()
+        try:
+            import json
+            event = json.loads(payload.decode('utf-8'))
+        except:
+            raise HTTPException(status_code=400, detail="Invalid payload")
+    else:
+        payload = await request.body()
+        sig_header = request.headers.get('stripe-signature')
+        
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, STRIPE_WEBHOOK_SECRET
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid payload: {str(e)}")
+        except stripe.error.SignatureVerificationError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid signature: {str(e)}")
+    
+    # Handle the event
+    if event['type'] == 'payment_intent.succeeded':
+        payment_intent = event['data']['object']
+        user_id = payment_intent['metadata'].get('user_id')
+        credits_to_add = int(payment_intent['metadata'].get('credits', '0'))
+        
+        if user_id and credits_to_add > 0:
+            # Get database session
+            db = next(get_db())
+            try:
+                user = db.query(User).filter(User.id == user_id).first()
+                if user:
+                    current_credits = int(user.credits or "0")
+                    new_credits = current_credits + credits_to_add
+                    user.credits = str(new_credits)
+                    db.commit()
+                    print(f"Webhook: Added {credits_to_add} credits to user {user_id}. New balance: {new_credits}")
+                else:
+                    print(f"Webhook: User {user_id} not found")
+            except Exception as e:
+                print(f"Webhook error: {str(e)}")
+                db.rollback()
+            finally:
+                db.close()
+    
+    return {"status": "success"}
+
+@app.get("/api/billing/stripe-key")
+async def get_stripe_publishable_key():
+    """Get Stripe publishable key for frontend."""
+    if not STRIPE_PUBLISHABLE_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stripe publishable key not configured"
+        )
+    return {"publishable_key": STRIPE_PUBLISHABLE_KEY}
 
 @app.get("/api/test")
 async def test_endpoint():
@@ -803,6 +1103,136 @@ def load_dataset_info(dataset_path: str) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
     return None
+
+def extract_axis_info_from_prompt(prompt_text: str, axis_type: str) -> List[str]:
+    """
+    Extract axis-specific information from a prompt text using simple keyword matching.
+    
+    Args:
+        prompt_text: The prompt variation text
+        axis_type: One of "Objects", "Lighting", "Materials", "Weather", "Road Surface"
+    
+    Returns:
+        List of extracted items (e.g., ["box", "container", "tool"] for Objects)
+    """
+    import re
+    items = []
+    prompt_lower = prompt_text.lower()
+    
+    if axis_type == "Objects":
+        # Common object keywords
+        object_patterns = [
+            r'\b(box|container|tool|pen|phone|cup|bottle|book|paper|bag|can|jar|bottle|plate|bowl|spoon|fork|knife|key|wallet|watch|glasses|hat|shoe|toy|ball|block|puzzle|game|device|gadget|machine|equipment|instrument)\w*\b',
+        ]
+        # Also look for objects mentioned after common phrases
+        object_phrases = [
+            r'(?:on|near|beside|next to|with|using|holding|carrying|picking up|placing|moving)\s+([a-z]+(?:\s+[a-z]+)?)',
+            r'(?:there is|there are|contains|includes|has|features)\s+([a-z]+(?:\s+[a-z]+)?)',
+        ]
+        for pattern in object_patterns + object_phrases:
+            matches = re.findall(pattern, prompt_lower)
+            items.extend([m if isinstance(m, str) else m[0] if isinstance(m, tuple) else str(m) for m in matches])
+    
+    elif axis_type == "Lighting":
+        lighting_keywords = ['bright', 'dim', 'dark', 'natural', 'artificial', 'fluorescent', 'led', 'sunlight', 'shadow', 'overcast', 'sunny', 'cloudy']
+        for keyword in lighting_keywords:
+            if keyword in prompt_lower:
+                items.append(keyword)
+    
+    elif axis_type == "Materials" or axis_type == "Color/Material":
+        material_keywords = ['wood', 'metal', 'plastic', 'glass', 'fabric', 'leather', 'ceramic', 'stone', 'concrete', 'tile', 'carpet', 'linoleum']
+        color_keywords = ['red', 'blue', 'green', 'yellow', 'white', 'black', 'gray', 'grey', 'brown', 'orange', 'purple', 'pink']
+        for keyword in material_keywords + color_keywords:
+            if keyword in prompt_lower:
+                items.append(keyword)
+    
+    elif axis_type == "Weather":
+        weather_keywords = ['sunny', 'rainy', 'cloudy', 'foggy', 'windy', 'snowy', 'clear', 'overcast']
+        for keyword in weather_keywords:
+            if keyword in prompt_lower:
+                items.append(keyword)
+    
+    elif axis_type == "Road Surface":
+        surface_keywords = ['asphalt', 'concrete', 'gravel', 'dirt', 'paved', 'unpaved', 'smooth', 'rough']
+        for keyword in surface_keywords:
+            if keyword in prompt_lower:
+                items.append(keyword)
+    
+    # Remove duplicates and normalize
+    items = list(set([item.strip().lower() for item in items if item and len(item) > 2]))
+    return items
+
+def get_prompt_variations_for_dataset(dataset_name: str) -> List[Dict[str, Any]]:
+    """
+    Retrieve all prompt variations for a dataset from S3.
+    
+    Returns:
+        List of variation dictionaries with 'axis', 'text', and 'video_path'
+    """
+    if dataset_name not in dataset_paths:
+        return []
+    
+    dataset_info = dataset_paths[dataset_name]
+    job_id = dataset_info.get("job_id")
+    
+    if not job_id:
+        return []
+    
+    variations = []
+    try:
+        # List all prompt folders for this job
+        # Prompts are stored at: jobs/{job_id}/input/prompts/{prompt_folder_name}/
+        prompts_prefix = f"{S3_JOBS_PREFIX}/{job_id}/input/prompts/"
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=prompts_prefix)
+        
+        # Find the most recent metadata.json file
+        metadata_files = []
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+            for obj in page['Contents']:
+                s3_key = obj['Key']
+                if s3_key.endswith('metadata.json'):
+                    metadata_files.append((obj['LastModified'], s3_key))
+        
+        if not metadata_files:
+            return []
+        
+        # Get the most recent metadata file
+        metadata_files.sort(key=lambda x: x[0], reverse=True)
+        latest_metadata_key = metadata_files[0][1]
+        
+        # Download and parse metadata
+        response = s3.get_object(Bucket=S3_BUCKET, Key=latest_metadata_key)
+        metadata_content = response['Body'].read().decode('utf-8')
+        metadata = json.loads(metadata_content)
+        
+        # Download each variation text
+        # variation_path from metadata is like: prompts/{prompt_folder_name}/variation_0001.txt
+        # upload_file_to_s3 stores it at: jobs/{job_id}/input/{variation_path}
+        for item in metadata:
+            variation_path = item.get('txt_file_path', '')
+            if variation_path:
+                # Full S3 key: jobs/{job_id}/input/{variation_path}
+                variation_key = f"{S3_JOBS_PREFIX}/{job_id}/input/{variation_path}"
+                try:
+                    var_response = s3.get_object(Bucket=S3_BUCKET, Key=variation_key)
+                    variation_text = var_response['Body'].read().decode('utf-8')
+                    variations.append({
+                        'axis': item.get('axis', 'Unknown'),
+                        'text': variation_text,
+                        'video_path': item.get('video_path', '')
+                    })
+                except Exception as e:
+                    print(f"Warning: Could not download variation {variation_path}: {e}")
+        
+    except Exception as e:
+        print(f"Error retrieving prompt variations: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return variations
 
 def count_episodes_from_parquet(dataset_path: str) -> int:
     """Count total episodes from parquet files in the dataset."""
@@ -1969,7 +2399,7 @@ async def run_augmentation(request: AugmentationRequest):
             "descriptions_count": len(descriptions),
             "variations_count": len(variations),
             "saved_files": saved_files,
-            "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/prompts/{prompt_folder_name}/",
+            "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/prompts/{prompt_folder_name}/",
             "message": f"Generated {len(variations)} prompt variations and uploaded to S3"
         }
                 
@@ -2527,13 +2957,15 @@ async def get_distributions(
     environment: str | None = None,
     axes: str | None = None,
     dataset_name: str | None = None,
+    include_variations: bool = Query(True, description="Include prompt variations in distributions"),
 ):
-    """Get data distribution visualizations.
+    """Get data distribution visualizations, optionally including prompt variations.
     
     Args:
         environment: "Indoor" or "Outdoor" mode
         axes: Comma-separated list of axis names (e.g., "Objects,Lighting,Materials")
         dataset_name: Optional dataset name to check ingestion status
+        include_variations: If True, include data from prompt variations in the plots
     """
     try:
         import traceback
@@ -2553,34 +2985,141 @@ async def get_distributions(
         df = get_dataframe()
         print(f"[DEBUG] DataFrame shape: {df.shape}")
         
-        # Return empty visualizations if database is empty (expected after "New Task")
-        if df.empty or len(df) == 0:
-            print("[INFO] Database is empty, returning empty visualizations (expected after 'New Task')")
-            return {"visualizations": []}
-        
         # Parse axes parameter
-        # Debug: log what we received from the API request
         print(f"[API] Received axes parameter: {repr(axes)}")
         selected_axes = None
         if axes is not None and axes != "":
             try:
-                # Try parsing as JSON array first
                 parsed = json.loads(axes)
-                # Ensure it's a list (could be empty array [])
                 if isinstance(parsed, list):
                     selected_axes = parsed
                 else:
                     selected_axes = [parsed] if parsed else []
                 print(f"[API] Parsed axes as JSON: {selected_axes}")
             except json.JSONDecodeError as e:
-                # Fall back to comma-separated string
                 selected_axes = [ax.strip() for ax in axes.split(",") if ax.strip()]
                 print(f"[API] Parsed axes as comma-separated (JSON parse failed: {e}): {selected_axes}")
         else:
-            # If axes is None or empty string, set to empty list to respect user's explicit deselection
-            # The frontend always sends the axes parameter, so None/empty means user unchecked everything
             selected_axes = []
             print(f"[API] Axes parameter is None or empty, setting to empty list (user deselected all)")
+        
+        # Track whether variations were found and used
+        variations_found = False
+        
+        # If include_variations is True and we have a dataset_name, merge variation data
+        if include_variations and dataset_name and selected_axes:
+            try:
+                variations = get_prompt_variations_for_dataset(dataset_name)
+                if variations:
+                    variations_found = True
+                    print(f"[INFO] Found {len(variations)} prompt variations, merging into distributions")
+                    
+                    # Create a temporary DataFrame with variation data
+                    variation_rows = []
+                    for var in variations:
+                        axis_changed = var.get('axis', 'Unknown')
+                        prompt_text = var.get('text', '')
+                        
+                        # Extract information for each selected axis
+                        row_data = {}
+                        for axis in selected_axes:
+                            extracted_items = extract_axis_info_from_prompt(prompt_text, axis)
+                            if extracted_items:
+                                # Join items with comma (matching original format)
+                                row_data[axis] = ", ".join(extracted_items)
+                        
+                        if row_data:
+                            variation_rows.append(row_data)
+                    
+                    if variation_rows:
+                        # Create DataFrame from variations
+                        variation_df = pd.DataFrame(variation_rows)
+                        
+                        # Map axis names to column names
+                        if environment == "Indoor":
+                            axis_to_column = {
+                                "Objects": "environment_distractor_objects_estimate",
+                                "Lighting": "environment_lighting_estimate",
+                                "Materials": "environment_surface_estimate",
+                                "Color/Material": "environment_surface_estimate",
+                            }
+                        elif environment == "Outdoor":
+                            axis_to_column = {
+                                "Objects": "environment_distractor_objects_estimate",
+                                "Lighting": "environment_outdoor_lighting_estimate",
+                                "Weather": "environment_weather_estimate",
+                                "Road Surface": "environment_road_surface_estimate",
+                            }
+                        else:
+                            axis_to_column = {
+                                "Objects": "environment_distractor_objects_estimate",
+                                "Lighting": "environment_lighting_estimate",
+                                "Materials": "environment_surface_estimate",
+                                "Color/Material": "environment_surface_estimate",
+                            }
+                        
+                        # Rename columns in variation_df to match DataFrame columns
+                        variation_df_renamed = pd.DataFrame()
+                        for axis, items_str in variation_df.items():
+                            if axis in axis_to_column:
+                                col_name = axis_to_column[axis]
+                                if isinstance(items_str, pd.Series):
+                                    variation_df_renamed[col_name] = items_str
+                                else:
+                                    variation_df_renamed[col_name] = [items_str] if isinstance(items_str, str) else items_str
+                        
+                        # Combine with original DataFrame
+                        if not df.empty:
+                            # For each column, merge original and variation values
+                            for col in variation_df_renamed.columns:
+                                if col in df.columns:
+                                    # Get all unique values from original DataFrame
+                                    original_values = df[col].dropna().unique().tolist()
+                                    
+                                    # Get all unique values from variations
+                                    variation_values = variation_df_renamed[col].dropna().unique().tolist()
+                                    
+                                    # For comma-separated values, we need to split and combine
+                                    all_items = set()
+                                    
+                                    # Extract items from original values (may be comma-separated)
+                                    for val in original_values:
+                                        if isinstance(val, str):
+                                            items = [item.strip() for item in val.split(',') if item.strip()]
+                                            all_items.update(items)
+                                    
+                                    # Extract items from variation values (may be comma-separated)
+                                    for val in variation_values:
+                                        if isinstance(val, str):
+                                            items = [item.strip() for item in val.split(',') if item.strip()]
+                                            all_items.update(items)
+                                    
+                                    # Create new rows for each unique item combination
+                                    # We'll create rows that combine original items with new variation items
+                                    for var_val in variation_values:
+                                        if var_val and isinstance(var_val, str):
+                                            # Create a copy of the first row and update the column with variation value
+                                            new_row = df.iloc[0].copy() if len(df) > 0 else pd.Series()
+                                            new_row[col] = var_val
+                                            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                        else:
+                            # If original df is empty, just use variation data
+                            df = variation_df_renamed
+                        
+                        print(f"[INFO] Combined DataFrame shape after merging variations: {df.shape}")
+            except Exception as var_error:
+                print(f"[WARNING] Error merging variations: {var_error}")
+                import traceback
+                traceback.print_exc()
+                # Continue with original dataframe if variation merge fails
+        
+        # Return empty visualizations if database is empty (expected after "New Task")
+        if df.empty or len(df) == 0:
+            print("[INFO] Database is empty, returning empty visualizations (expected after 'New Task')")
+            return {
+                "visualizations": [],
+                "variations_included": variations_found if include_variations else False
+            }
         
         # Always call get_data_distributions even if dataframe is empty
         # so it can return empty plots for selected axes
@@ -2592,7 +3131,10 @@ async def get_distributions(
             use_cache=False,
         )
         print(f"[DEBUG] Got {len(visualizations)} visualizations")
-        return {"visualizations": visualizations}
+        return {
+            "visualizations": visualizations,
+            "variations_included": variations_found if include_variations else False
+        }
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()

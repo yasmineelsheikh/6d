@@ -2,12 +2,14 @@
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import tempfile
 import os
 import subprocess
 import json
 import boto3
+import requests
+import cv2
 from pathlib import Path
 from datetime import datetime
 from botocore.exceptions import BotoCoreError, ClientError
@@ -22,7 +24,50 @@ app = FastAPI()
 class CosmosRequest(BaseModel):
     dataset_name: str
     job_id: str
+    user_id: Optional[str] = None
+    backend_api_url: Optional[str] = None  # URL of main backend API for credit deduction
 
+
+def get_video_duration(video_path: str) -> float:
+    """Get video duration in seconds using OpenCV."""
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return 0.0
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        cap.release()
+        
+        if fps > 0:
+            duration = frame_count / fps
+            return duration
+        return 0.0
+    except Exception as e:
+        print(f"Error getting video duration for {video_path}: {e}")
+        return 0.0
+
+def deduct_credits(backend_api_url: str, user_id: str, credits: int) -> bool:
+    """Call backend API to deduct credits using internal endpoint."""
+    try:
+        # Use the internal endpoint that doesn't require authentication
+        response = requests.post(
+            f"{backend_api_url}/api/billing/deduct-internal",
+            json={"user_id": user_id, "credits": credits},
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        if response.status_code == 200:
+            result = response.json()
+            print(f"Successfully deducted {credits} credits for user {user_id}. New balance: {result.get('credits', 'unknown')}")
+            return True
+        else:
+            error_detail = response.text
+            print(f"Failed to deduct credits: {response.status_code} - {error_detail}")
+            return False
+    except Exception as e:
+        print(f"Error calling credit deduction API: {e}")
+        return False
 
 def download_folder_from_s3(s3_prefix: str, local_path: str) -> None:
     os.makedirs(local_path, exist_ok=True)
@@ -92,6 +137,8 @@ def run_cosmos(req: CosmosRequest):
 
             # Process each video
             output_urls = []
+            total_output_duration = 0.0  # Total duration of all output videos in seconds
+            
             for i, video_path in enumerate(video_files):
                 episode_index = Path(video_path).stem
 
@@ -142,6 +189,12 @@ def run_cosmos(req: CosmosRequest):
                 output_files = list(Path(output_dir).glob("*.mp4"))
                 if output_files:
                     output_video = output_files[0]
+                    
+                    # Get duration of output video for credit calculation
+                    video_duration = get_video_duration(str(output_video))
+                    total_output_duration += video_duration
+                    print(f"Output video duration: {video_duration:.2f} seconds")
+                    
                     # Upload output to S3 with job-based organization
                     # Use original episode name with _output_N suffix for intuitive naming
                     # This allows for multiple outputs per input in the future (e.g., episode_0_output_1.mp4, episode_0_output_2.mp4)
@@ -159,7 +212,24 @@ def run_cosmos(req: CosmosRequest):
             if not output_urls:
                 raise RuntimeError("No output videos were generated")
             
-            return {"s3_url": output_urls[0] if len(output_urls) == 1 else output_urls}
+            # Deduct credits based on total output video duration
+            # 1 credit = 1 second of video
+            credits_to_deduct = int(total_output_duration)
+            if credits_to_deduct > 0 and req.user_id and req.backend_api_url:
+                print(f"Total output video duration: {total_output_duration:.2f} seconds")
+                print(f"Deducting {credits_to_deduct} credits for user {req.user_id}")
+                success = deduct_credits(req.backend_api_url, req.user_id, credits_to_deduct)
+                if not success:
+                    print(f"Warning: Failed to deduct credits, but videos were generated successfully")
+            elif credits_to_deduct > 0:
+                print(f"Warning: Cannot deduct credits - missing user_id or backend_api_url")
+                print(f"Total output video duration: {total_output_duration:.2f} seconds ({credits_to_deduct} credits)")
+            
+            return {
+                "s3_url": output_urls[0] if len(output_urls) == 1 else output_urls,
+                "total_duration_seconds": total_output_duration,
+                "credits_deducted": credits_to_deduct if (req.user_id and req.backend_api_url) else 0
+            }
 
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error processing Cosmos inference: {str(e)}")
