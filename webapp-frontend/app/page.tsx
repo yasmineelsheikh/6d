@@ -775,6 +775,8 @@ export default function Home() {
                         placeholder="Access Key"
                         value={s3AccessKey}
                         onChange={(e) => setS3AccessKey(e.target.value)}
+                        autoComplete="off"
+                        data-form-type="other"
                         className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
                       />
                       <input
@@ -782,6 +784,8 @@ export default function Home() {
                         placeholder="Secret Key"
                         value={s3SecretKey}
                         onChange={(e) => setS3SecretKey(e.target.value)}
+                        autoComplete="new-password"
+                        data-form-type="other"
                         className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
                       />
                     </div>
