@@ -30,7 +30,7 @@ else:
     # Fallback to SQLite for local development only
     db_path = "./users.db"
     DATABASE_URL = f"sqlite:///{db_path}"
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -48,7 +48,7 @@ class User(Base):
 
 # Create tables if they don't exist
 try:
-    Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 except Exception as e:
     print(f"Warning: Could not create database tables at startup: {e}")
 
