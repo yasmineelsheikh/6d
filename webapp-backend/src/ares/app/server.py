@@ -65,18 +65,30 @@ def run_cosmos(req: CosmosRequest):
             # Download dataset folder from S3
             print(f"Downloading dataset from s3://{S3_BUCKET}/{s3_prefix}")
             download_folder_from_s3(s3_prefix, local_data_path)
-            # Find prompt.txt file
+            
+            # Find prompt.txt file (can be in root or videos/ folder)
             prompt_path = os.path.join(local_data_path, "prompt.txt")
             if not os.path.exists(prompt_path):
-                raise FileNotFoundError(f"Prompt file not found at {prompt_path}")
-            # Find all video files
+                # Try in videos/ subfolder
+                videos_prompt_path = os.path.join(local_data_path, "videos", "prompt.txt")
+                if os.path.exists(videos_prompt_path):
+                    prompt_path = videos_prompt_path
+                else:
+                    raise FileNotFoundError(f"Prompt file not found at {prompt_path} or {videos_prompt_path}")
+            
+            # Find all video files - can be in videos/ subfolder or directly in root
             video_files = []
+            video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
             for root, dirs, files in os.walk(local_data_path):
+                # Skip non-video directories (data/, meta/, etc.)
+                if os.path.basename(root) in ['data', 'meta']:
+                    continue
                 for file in files:
-                    if file.endswith('.mp4'):
+                    if any(file.lower().endswith(ext) for ext in video_extensions):
                         video_files.append(os.path.join(root, file))
+            
             if not video_files:
-                raise ValueError(f"No video files found in downloaded dataset")
+                raise ValueError(f"No video files found in downloaded dataset. Videos should be in either 'videos/' subfolder or root directory.")
 
             # Process each video
             output_urls = []

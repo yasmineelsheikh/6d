@@ -1235,22 +1235,40 @@ async def upload_dataset(
             )
         
         # Validate dataset structure by checking S3 for required folders
-        # Check if data/, meta/, and videos/ folders exist in S3
-        required_folders = ["data", "meta", "videos"]
+        # Only data/ folder is required; meta/ folder is optional
+        # Videos can be either in videos/ subfolder or directly in root
+        required_folders = ["data"]
         folder_exists = {folder: False for folder in required_folders}
+        has_videos_folder = False
+        has_videos_in_root = False
         
         for file_path in uploaded_files:
+            # Check for required folders
             for folder in required_folders:
                 if file_path.startswith(f"{folder}/"):
                     folder_exists[folder] = True
                     break
+            
+            # Check for videos in videos/ subfolder
+            if file_path.startswith("videos/") and file_path.endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v')):
+                has_videos_folder = True
+            
+            # Check for videos directly in root (not in any subfolder)
+            if "/" not in file_path and file_path.endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v')):
+                has_videos_in_root = True
         
         missing_folders = [folder for folder, exists in folder_exists.items() if not exists]
         if missing_folders:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid LeRobot dataset structure. Missing required folders: {', '.join(missing_folders)}. "
-                       f"Directory must contain 'data/', 'meta/', and 'videos/' folders."
+                detail=f"Invalid dataset structure. Missing required folder: {', '.join(missing_folders)}. "
+                       f"Directory must contain 'data/' folder. 'meta/' folder is optional."
+            )
+        
+        if not has_videos_folder and not has_videos_in_root:
+            raise HTTPException(
+                status_code=400,
+                detail="No video files found. Videos must be either in a 'videos/' subfolder or directly in the root directory."
             )
         
         # Create temporary local directory for ingestion
@@ -1379,13 +1397,32 @@ async def upload_dataset_from_s3(request: S3UploadRequest):
         )
         
         # Validate dataset structure
-        required_folders = ["data", "meta", "videos"]
+        # Only data/ folder is required; meta/ folder is optional
+        # Videos can be either in videos/ subfolder or directly in root
+        required_folders = ["data"]
         missing_folders = [folder for folder in required_folders if not (upload_dir / folder).exists()]
         if missing_folders:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid LeRobot dataset structure. Missing required folders: {', '.join(missing_folders)}. "
-                       f"Directory must contain 'data/', 'meta/', and 'videos/' folders."
+                detail=f"Invalid dataset structure. Missing required folder: {', '.join(missing_folders)}. "
+                       f"Directory must contain 'data/' folder. 'meta/' folder is optional."
+            )
+        
+        # Check for videos in either videos/ subfolder or root
+        videos_folder = upload_dir / "videos"
+        has_videos_in_folder = videos_folder.exists() and any(
+            f.suffix.lower() in {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+            for f in videos_folder.iterdir() if f.is_file()
+        )
+        has_videos_in_root = any(
+            f.suffix.lower() in {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+            for f in upload_dir.iterdir() if f.is_file()
+        )
+        
+        if not has_videos_in_folder and not has_videos_in_root:
+            raise HTTPException(
+                status_code=400,
+                detail="No video files found. Videos must be either in a 'videos/' subfolder or directly in the root directory."
             )
         
         # Upload to our S3 with job-based organization
@@ -1626,10 +1663,29 @@ async def load_dataset(request: DatasetLoadRequest):
             if not dataset_path.exists():
                 raise HTTPException(status_code=400, detail=f"Path does not exist: {request.dataset_path}")
         
-        if not (dataset_path / "data").exists() or not (dataset_path / "meta").exists() or not (dataset_path / "videos").exists():
+        # Only data/ folder is required; meta/ folder is optional
+        # Videos can be either in videos/ subfolder or directly in root
+        if not (dataset_path / "data").exists():
             raise HTTPException(
                 status_code=400,
-                detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
+                detail="Invalid dataset structure. Directory must contain 'data/' folder. 'meta/' folder is optional."
+            )
+        
+        # Check for videos in either videos/ subfolder or root
+        videos_folder = dataset_path / "videos"
+        has_videos_in_folder = videos_folder.exists() and any(
+            f.suffix.lower() in {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+            for f in videos_folder.iterdir() if f.is_file()
+        )
+        has_videos_in_root = any(
+            f.suffix.lower() in {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
+            for f in dataset_path.iterdir() if f.is_file()
+        )
+        
+        if not has_videos_in_folder and not has_videos_in_root:
+            raise HTTPException(
+                status_code=400,
+                detail="No video files found. Videos must be either in a 'videos/' subfolder or directly in the root directory."
             )
         
         # Run basic ingestion (no database creation)
@@ -2036,21 +2092,27 @@ async def export_dataset(dataset_name: str):
             export_dir = Path(temp_dir)
             
             # Download original episodes from S3
-            # Structure: s3://{bucket}/jobs/{job_id}/input/videos/
-            original_prefix = f"{S3_JOBS_PREFIX}/{job_id}/input/videos/"
-            print(f"Downloading original episodes from s3://{S3_BUCKET}/{original_prefix}")
-            
+            # Videos can be in either jobs/{job_id}/input/videos/ or jobs/{job_id}/input/ (root)
             original_files = {}
+            
+            # First, try videos/ subfolder
+            videos_prefix = f"{S3_JOBS_PREFIX}/{job_id}/input/videos/"
+            print(f"Checking for videos in s3://{S3_BUCKET}/{videos_prefix}")
+            
             try:
                 paginator = s3.get_paginator('list_objects_v2')
-                pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=original_prefix)
+                pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=videos_prefix)
                 
                 for page in pages:
                     if 'Contents' not in page:
                         continue
                     for obj in page['Contents']:
                         s3_key = obj['Key']
-                        if s3_key == original_prefix or s3_key.endswith('/'):
+                        if s3_key == videos_prefix or s3_key.endswith('/'):
+                            continue
+                        
+                        # Only process video files
+                        if not s3_key.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v')):
                             continue
                         
                         # Get filename from S3 key
@@ -2060,13 +2122,49 @@ async def export_dataset(dataset_name: str):
                         # Download file
                         s3.download_file(S3_BUCKET, s3_key, str(local_file_path))
                         original_files[filename] = local_file_path
-                        print(f"Downloaded original episode: {filename}")
-                
-                if not original_files:
-                    print(f"Warning: No original episodes found in s3://{S3_BUCKET}/{original_prefix}")
+                        print(f"Downloaded original episode from videos/: {filename}")
             except Exception as e:
-                print(f"Warning: Error downloading original episodes: {e}")
-                # Continue even if original episodes can't be downloaded
+                print(f"Warning: Error downloading from videos/ folder: {e}")
+            
+            # If no videos found in videos/ folder, try root directory
+            if not original_files:
+                root_prefix = f"{S3_JOBS_PREFIX}/{job_id}/input/"
+                print(f"No videos in videos/ folder, checking root: s3://{S3_BUCKET}/{root_prefix}")
+                
+                try:
+                    paginator = s3.get_paginator('list_objects_v2')
+                    pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=root_prefix)
+                    
+                    for page in pages:
+                        if 'Contents' not in page:
+                            continue
+                        for obj in page['Contents']:
+                            s3_key = obj['Key']
+                            if s3_key == root_prefix or s3_key.endswith('/'):
+                                continue
+                            
+                            # Skip files in subfolders (data/, meta/, etc.)
+                            relative_path = s3_key[len(root_prefix):]
+                            if '/' in relative_path:
+                                continue
+                            
+                            # Only process video files
+                            if not s3_key.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v')):
+                                continue
+                            
+                            # Get filename from S3 key
+                            filename = os.path.basename(s3_key)
+                            local_file_path = export_dir / filename
+                            
+                            # Download file
+                            s3.download_file(S3_BUCKET, s3_key, str(local_file_path))
+                            original_files[filename] = local_file_path
+                            print(f"Downloaded original episode from root: {filename}")
+                except Exception as e:
+                    print(f"Warning: Error downloading from root: {e}")
+            
+            if not original_files:
+                print(f"Warning: No original episodes found in s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/")
             
             # Download output videos from S3
             # Structure: s3://{bucket}/jobs/{job_id}/output/
