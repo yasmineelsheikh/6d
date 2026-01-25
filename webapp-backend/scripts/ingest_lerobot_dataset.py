@@ -149,8 +149,8 @@ def ingest_dataset(data_dir: str, engine_url: str, dataset_name: str) -> int:
     data_path = dataset_path / "data"
     total_episodes = 0
     
-    # Copy episode videos from dataset's videos directory to ARES_VIDEO_DIR
-    copy_episode_videos(dataset_path, dataset_name)
+    # Do not copy videos locally; videos remain in S3 and are accessed on demand
+    # copy_episode_videos(dataset_path, dataset_name)
     
     # Iterate over chunks
     for chunk_path in data_path.glob("chunk-*"):
