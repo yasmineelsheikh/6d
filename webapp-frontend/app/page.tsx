@@ -56,9 +56,21 @@ export default function Home() {
   const [datasetName, setDatasetName] = useState('')
   const [uploadLoading, setUploadLoading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
-  const [uploadMode, setUploadMode] = useState<'local' | 's3'>('local')
+  const [uploadMode, setUploadMode] = useState<'local' | 's3' | 'user-s3' | 'huggingface'>('local')
   const [uploadedFiles, setUploadedFiles] = useState<FileList | null>(null)
   const [s3Path, setS3Path] = useState('')
+  
+  // S3 credentials state
+  const [s3AccessKey, setS3AccessKey] = useState('')
+  const [s3SecretKey, setS3SecretKey] = useState('')
+  const [s3Bucket, setS3Bucket] = useState('')
+  const [s3Region, setS3Region] = useState('us-east-1')
+  const [s3UserPath, setS3UserPath] = useState('')
+  
+  // Hugging Face state
+  const [hfRepoId, setHfRepoId] = useState('')
+  const [hfSplit, setHfSplit] = useState('train')
+  const [hfToken, setHfToken] = useState('')
   const [ingestionStatus, setIngestionStatus] = useState<'in_progress' | 'complete' | 'failed' | null>(null)
   const [ingestingDatasetName, setIngestingDatasetName] = useState<string | null>(null)
   const [ingestionProgress, setIngestionProgress] = useState(0)
@@ -106,6 +118,8 @@ export default function Home() {
   const handleLoadDataset = async () => {
     if (uploadMode === 'local' && !uploadedFiles) return
     if (uploadMode === 's3' && !s3Path) return
+    if (uploadMode === 'user-s3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) return
+    if (uploadMode === 'huggingface' && !hfRepoId) return
     
     // Auto-generate dataset name if not set
     let finalDatasetName = datasetName
@@ -117,6 +131,11 @@ export default function Home() {
       } else if (uploadMode === 's3' && s3Path) {
         const pathParts = s3Path.replace('s3://', '').split('/').filter(p => p)
         finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+      } else if (uploadMode === 'user-s3' && s3UserPath) {
+        const pathParts = s3UserPath.split('/').filter(p => p)
+        finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+      } else if (uploadMode === 'huggingface' && hfRepoId) {
+        finalDatasetName = hfRepoId.split('/').pop() || 'dataset'
       } else {
         return // Cannot proceed without a dataset name
       }
@@ -148,8 +167,8 @@ export default function Home() {
           method: 'POST',
           body: formData,
         })
-      } else {
-        // S3 path
+      } else if (uploadMode === 's3') {
+        // S3 path (existing functionality)
         response = await fetch(`${API_BASE}/api/datasets/load`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -161,6 +180,38 @@ export default function Home() {
             is_s3: true,
           }),
         })
+      } else if (uploadMode === 'user-s3') {
+        // User's S3 bucket with credentials
+        response = await fetch(`${API_BASE}/api/datasets/upload-s3`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dataset_name: finalDatasetName,
+            s3_access_key: s3AccessKey,
+            s3_secret_key: s3SecretKey,
+            s3_bucket: s3Bucket,
+            s3_region: s3Region,
+            s3_path: s3UserPath,
+            environment: environment || '',
+            axes: selectedAxes.length > 0 ? selectedAxes : null,
+          }),
+        })
+      } else if (uploadMode === 'huggingface') {
+        // Hugging Face dataset
+        response = await fetch(`${API_BASE}/api/datasets/upload-huggingface`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dataset_name: finalDatasetName,
+            hf_repo_id: hfRepoId,
+            hf_split: hfSplit,
+            hf_token: hfToken || null,
+            environment: environment || '',
+            axes: selectedAxes.length > 0 ? selectedAxes : null,
+          }),
+        })
+      } else {
+        throw new Error('Invalid upload mode')
       }
 
       if (!response.ok) {
@@ -688,6 +739,40 @@ export default function Home() {
                     <Cloud className="w-3 h-3" />
                     S3
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadMode('user-s3')
+                      setUploadedFiles(null)
+                      setDatasetPath('')
+                      setS3Path('')
+                    }}
+                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                      uploadMode === 'user-s3'
+                        ? 'bg-[#4b6671] text-white'
+                        : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
+                    }`}
+                  >
+                    <Cloud className="w-3 h-3" />
+                    Your S3
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadMode('huggingface')
+                      setUploadedFiles(null)
+                      setDatasetPath('')
+                      setS3Path('')
+                    }}
+                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
+                      uploadMode === 'huggingface'
+                        ? 'bg-[#4b6671] text-white'
+                        : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
+                    }`}
+                  >
+                    <Cloud className="w-3 h-3" />
+                    HF
+                  </button>
                 </div>
 
                 {/* Local Upload */}
@@ -739,6 +824,103 @@ export default function Home() {
                     }}
                     className="w-[576px] px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
                   />
+                )}
+
+                {/* User S3 Credentials */}
+                {uploadMode === 'user-s3' && (
+                  <div className="flex flex-col gap-2 w-[576px]">
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Access Key"
+                        value={s3AccessKey}
+                        onChange={(e) => setS3AccessKey(e.target.value)}
+                        className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                      />
+                      <input
+                        type="password"
+                        placeholder="Secret Key"
+                        value={s3SecretKey}
+                        onChange={(e) => setS3SecretKey(e.target.value)}
+                        className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Bucket Name"
+                        value={s3Bucket}
+                        onChange={(e) => setS3Bucket(e.target.value)}
+                        className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Region (e.g., us-east-1)"
+                        value={s3Region}
+                        onChange={(e) => setS3Region(e.target.value)}
+                        className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Path within bucket (e.g., datasets/my-dataset/)"
+                      value={s3UserPath}
+                      onChange={(e) => {
+                        const path = e.target.value
+                        setS3UserPath(path)
+                        setDatasetPath(path)
+                        // Auto-generate dataset name from path
+                        if (path) {
+                          const pathParts = path.split('/').filter(p => p)
+                          const datasetNameFromPath = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+                          setDatasetName(datasetNameFromPath)
+                        } else {
+                          setDatasetName('')
+                        }
+                      }}
+                      className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                    />
+                  </div>
+                )}
+
+                {/* Hugging Face Input */}
+                {uploadMode === 'huggingface' && (
+                  <div className="flex flex-col gap-2 w-[576px]">
+                    <input
+                      type="text"
+                      placeholder="Repository ID (e.g., username/dataset-name)"
+                      value={hfRepoId}
+                      onChange={(e) => {
+                        const repoId = e.target.value
+                        setHfRepoId(repoId)
+                        setDatasetPath(repoId)
+                        // Auto-generate dataset name from repo ID
+                        if (repoId) {
+                          const datasetNameFromRepo = repoId.split('/').pop() || 'dataset'
+                          setDatasetName(datasetNameFromRepo)
+                        } else {
+                          setDatasetName('')
+                        }
+                      }}
+                      className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Split (default: train)"
+                        value={hfSplit}
+                        onChange={(e) => setHfSplit(e.target.value)}
+                        className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                      />
+                      <input
+                        type="password"
+                        placeholder="HF Token (optional, for private datasets)"
+                        value={hfToken}
+                        onChange={(e) => setHfToken(e.target.value)}
+                        className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
               
@@ -828,7 +1010,13 @@ export default function Home() {
             <div className="flex justify-center mt-10">
               <button
                 onClick={handleLoadDataset}
-                disabled={uploadLoading || (uploadMode === 'local' && !uploadedFiles) || (uploadMode === 's3' && !s3Path)}
+                disabled={
+                  uploadLoading || 
+                  (uploadMode === 'local' && !uploadedFiles) || 
+                  (uploadMode === 's3' && !s3Path) ||
+                  (uploadMode === 'user-s3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) ||
+                  (uploadMode === 'huggingface' && !hfRepoId)
+                }
                 className="w-1/4 px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
                 style={{ backgroundColor: '#4b6671' }}
               >

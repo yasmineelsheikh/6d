@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
-from sqlalchemy import create_engine, Column, String, DateTime
+from sqlalchemy import create_engine, Column, String, DateTime, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, relationship
 import bcrypt
 import os
+from cryptography.fernet import Fernet
+import base64
 
 # Database setup
 # Use Supabase PostgreSQL if available, otherwise fall back to SQLite for local dev
@@ -45,6 +47,26 @@ class User(Base):
     last_name = Column(String)
     hashed_password = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship to credentials
+    credentials = relationship("UserCredentials", back_populates="user", cascade="all, delete-orphan")
+
+# UserCredentials model for storing S3 credentials
+class UserCredentials(Base):
+    __tablename__ = "user_credentials"
+    
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    credential_type = Column(String, nullable=False)  # "s3", "huggingface", etc.
+    encrypted_access_key = Column(Text)  # Encrypted AWS access key
+    encrypted_secret_key = Column(Text)  # Encrypted AWS secret key
+    bucket_name = Column(String)  # S3 bucket name
+    region = Column(String, default="us-east-1")  # AWS region
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship to user
+    user = relationship("User", back_populates="credentials")
 
 # Create tables if they don't exist
 try:
@@ -124,3 +146,89 @@ def create_user(db: Session, email: str, first_name: str, last_name: str, passwo
     db.commit()
     db.refresh(user)
     return user
+
+# Encryption/Decryption helpers for credentials
+def _get_encryption_key() -> bytes:
+    """Get encryption key from SECRET_KEY."""
+    # Use SECRET_KEY to derive a Fernet key
+    key = SECRET_KEY.encode('utf-8')
+    # Pad or truncate to 32 bytes for Fernet
+    if len(key) < 32:
+        key = key.ljust(32, b'0')
+    elif len(key) > 32:
+        key = key[:32]
+    # Fernet requires base64-encoded 32-byte key
+    return base64.urlsafe_b64encode(key)
+
+def encrypt_credential(plaintext: str) -> str:
+    """Encrypt a credential value."""
+    if not plaintext:
+        return ""
+    f = Fernet(_get_encryption_key())
+    encrypted = f.encrypt(plaintext.encode('utf-8'))
+    return encrypted.decode('utf-8')
+
+def decrypt_credential(encrypted: str) -> str:
+    """Decrypt a credential value."""
+    if not encrypted:
+        return ""
+    try:
+        f = Fernet(_get_encryption_key())
+        decrypted = f.decrypt(encrypted.encode('utf-8'))
+        return decrypted.decode('utf-8')
+    except Exception as e:
+        raise ValueError(f"Failed to decrypt credential: {str(e)}")
+
+def get_user_s3_credentials(db: Session, user_id: str) -> Optional[dict]:
+    """Get user's S3 credentials (decrypted)."""
+    cred = db.query(UserCredentials).filter(
+        UserCredentials.user_id == user_id,
+        UserCredentials.credential_type == "s3"
+    ).first()
+    if not cred:
+        return None
+    return {
+        "access_key": decrypt_credential(cred.encrypted_access_key) if cred.encrypted_access_key else None,
+        "secret_key": decrypt_credential(cred.encrypted_secret_key) if cred.encrypted_secret_key else None,
+        "bucket_name": cred.bucket_name,
+        "region": cred.region
+    }
+
+def save_user_s3_credentials(
+    db: Session,
+    user_id: str,
+    access_key: str,
+    secret_key: str,
+    bucket_name: str,
+    region: str = "us-east-1"
+) -> UserCredentials:
+    """Save or update user's S3 credentials (encrypted)."""
+    import uuid
+    cred = db.query(UserCredentials).filter(
+        UserCredentials.user_id == user_id,
+        UserCredentials.credential_type == "s3"
+    ).first()
+    
+    if cred:
+        # Update existing
+        cred.encrypted_access_key = encrypt_credential(access_key)
+        cred.encrypted_secret_key = encrypt_credential(secret_key)
+        cred.bucket_name = bucket_name
+        cred.region = region
+        cred.updated_at = datetime.utcnow()
+    else:
+        # Create new
+        cred = UserCredentials(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            credential_type="s3",
+            encrypted_access_key=encrypt_credential(access_key),
+            encrypted_secret_key=encrypt_credential(secret_key),
+            bucket_name=bucket_name,
+            region=region
+        )
+        db.add(cred)
+    
+    db.commit()
+    db.refresh(cred)
+    return cred

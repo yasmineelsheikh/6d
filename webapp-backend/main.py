@@ -463,10 +463,45 @@ class TestingUploadRequest(BaseModel):
     dataset_name: str
     test_directory: str
 
+class S3UploadRequest(BaseModel):
+    dataset_name: str
+    s3_access_key: str
+    s3_secret_key: str
+    s3_bucket: str
+    s3_region: str
+    s3_path: str  # Path within the bucket (e.g., "my-dataset/" or "datasets/my-dataset/")
+    environment: Optional[str] = ""
+    axes: Optional[List[str]] = None
+
+class HuggingFaceUploadRequest(BaseModel):
+    dataset_name: str
+    hf_repo_id: str  # e.g., "username/dataset-name"
+    hf_split: Optional[str] = "train"  # Dataset split to use
+    hf_token: Optional[str] = None  # Optional Hugging Face token for private datasets
+    environment: Optional[str] = ""
+    axes: Optional[List[str]] = None
+
 class DatasetInfo(BaseModel):
     total_episodes: int
     robot_type: str
     dataset_name: str
+
+class S3CredentialsRequest(BaseModel):
+    access_key: str
+    secret_key: str
+    bucket_name: str
+    region: Optional[str] = "us-east-1"
+
+class UserS3LoadRequest(BaseModel):
+    dataset_name: str
+    s3_path: str  # Path within the bucket (e.g., "my-datasets/dataset-name/")
+    bucket_name: Optional[str] = None  # Optional, uses saved bucket if not provided
+
+class HuggingFaceLoadRequest(BaseModel):
+    dataset_name: str
+    hf_dataset_id: str  # e.g., "lerobot/stack_cups"
+    split: Optional[str] = "train"
+    revision: Optional[str] = None
 
 # Helper functions for S3 Storage with job-based organization
 def generate_job_id() -> str:
@@ -587,6 +622,160 @@ def download_dataset_from_s3(job_id: str, dataset_name: str, local_path: Path) -
         raise HTTPException(
             status_code=500,
             detail=f"Error downloading dataset from S3: {str(e)}"
+        )
+
+
+def download_dataset_from_user_s3(
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+    region: str,
+    s3_path: str,
+    local_path: Path
+) -> Path:
+    """
+    Download dataset from user's S3 bucket using their credentials.
+    s3_path is the prefix/path within the bucket (e.g., "my-dataset/" or "datasets/my-dataset/")
+    """
+    local_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create S3 client with user credentials
+    user_s3 = boto3.client(
+        's3',
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region
+    )
+    
+    try:
+        # Normalize s3_path (ensure it ends with / if not empty)
+        prefix = s3_path.rstrip('/') + '/' if s3_path else ''
+        
+        paginator = user_s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
+        
+        files_downloaded = 0
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+            for obj in page['Contents']:
+                s3_key = obj['Key']
+                # Extract relative path from S3 key (remove prefix)
+                relative_path = s3_key[len(prefix):] if prefix else s3_key
+                if not relative_path:
+                    continue
+                
+                local_file_path = local_path / relative_path
+                local_file_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Download file
+                user_s3.download_file(bucket, s3_key, str(local_file_path))
+                files_downloaded += 1
+        
+        if files_downloaded == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No files found in S3 path: s3://{bucket}/{prefix}"
+            )
+        
+        print(f"Downloaded {files_downloaded} files from user S3 bucket")
+        return local_path
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading dataset from user S3: {str(e)}"
+        )
+
+
+def download_dataset_from_huggingface(
+    repo_id: str,
+    split: str,
+    hf_token: Optional[str],
+    local_path: Path
+) -> Path:
+    """
+    Download dataset from Hugging Face and convert to LeRobot format.
+    """
+    try:
+        from datasets import load_dataset
+        import shutil
+        
+        local_path.mkdir(parents=True, exist_ok=True)
+        
+        print(f"Loading Hugging Face dataset: {repo_id} (split: {split})")
+        
+        # Load dataset from Hugging Face
+        if hf_token:
+            dataset = load_dataset(repo_id, split=split, token=hf_token)
+        else:
+            dataset = load_dataset(repo_id, split=split)
+        
+        # Convert to LeRobot format
+        # Create required directories
+        data_dir = local_path / "data"
+        meta_dir = local_path / "meta"
+        videos_dir = local_path / "videos"
+        
+        data_dir.mkdir(exist_ok=True)
+        meta_dir.mkdir(exist_ok=True)
+        videos_dir.mkdir(exist_ok=True)
+        
+        # Save dataset as parquet files
+        # Hugging Face datasets are typically already in a compatible format
+        # We'll save them as parquet files in the data/ directory
+        import pandas as pd
+        
+        # Convert dataset to pandas DataFrame if it's a Dataset object
+        if hasattr(dataset, 'to_pandas'):
+            df = dataset.to_pandas()
+        elif hasattr(dataset, '__iter__'):
+            # Convert iterable to list then DataFrame
+            data_list = list(dataset)
+            df = pd.DataFrame(data_list)
+        else:
+            raise ValueError(f"Unsupported dataset type: {type(dataset)}")
+        
+        # Save as parquet
+        parquet_path = data_dir / "data.parquet"
+        df.to_parquet(parquet_path, index=False)
+        print(f"Saved dataset to {parquet_path}")
+        
+        # Create basic metadata
+        metadata = {
+            "dataset_name": repo_id.split('/')[-1],
+            "total_episodes": len(df),
+            "robot_type": "Unknown",  # Will be determined during ingestion
+            "source": "huggingface",
+            "repo_id": repo_id,
+            "split": split
+        }
+        
+        import json
+        with open(meta_dir / "info.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        # If dataset has video/image columns, copy them to videos/ directory
+        # This is dataset-specific, so we'll handle common cases
+        video_columns = [col for col in df.columns if 'video' in col.lower() or 'image' in col.lower()]
+        if video_columns:
+            print(f"Found video/image columns: {video_columns}")
+            # Note: Actual video handling would depend on the dataset structure
+        
+        print(f"Successfully downloaded and converted Hugging Face dataset")
+        return local_path
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="Hugging Face libraries not installed. Please install 'datasets' and 'huggingface-hub'."
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading dataset from Hugging Face: {str(e)}\n{error_trace}"
         )
 
 
@@ -1155,6 +1344,254 @@ async def upload_dataset(
         return JSONResponse(
             status_code=500,
             content={"detail": f"Error uploading dataset: {str(e)}"}
+        )
+
+
+@app.post("/api/datasets/upload-s3")
+async def upload_dataset_from_s3(request: S3UploadRequest):
+    """Upload a dataset from user's S3 bucket using their credentials."""
+    try:
+        print(f"Received S3 upload request for dataset: {request.dataset_name}")
+        print(f"S3 bucket: {request.s3_bucket}, path: {request.s3_path}")
+        
+        # Generate unique job ID for this upload
+        job_id = generate_job_id()
+        print(f"Generated job ID: {job_id} for dataset: {request.dataset_name}")
+        
+        # Create temporary local directory for download and ingestion
+        if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT") or os.getenv("RAILWAY_ENVIRONMENT"):
+            upload_dir = Path("/tmp") / "uploaded_datasets" / job_id / request.dataset_name
+        else:
+            upload_dir = project_root / "data" / "uploaded_datasets" / job_id / request.dataset_name
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Download dataset from user's S3 bucket
+        print(f"Downloading dataset from user S3 bucket...")
+        download_dataset_from_user_s3(
+            access_key=request.s3_access_key,
+            secret_key=request.s3_secret_key,
+            bucket=request.s3_bucket,
+            region=request.s3_region,
+            s3_path=request.s3_path,
+            local_path=upload_dir
+        )
+        
+        # Validate dataset structure
+        required_folders = ["data", "meta", "videos"]
+        missing_folders = [folder for folder in required_folders if not (upload_dir / folder).exists()]
+        if missing_folders:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid LeRobot dataset structure. Missing required folders: {', '.join(missing_folders)}. "
+                       f"Directory must contain 'data/', 'meta/', and 'videos/' folders."
+            )
+        
+        # Upload to our S3 with job-based organization
+        print(f"Uploading dataset to our S3 storage...")
+        for root, dirs, files in os.walk(upload_dir):
+            for file in files:
+                local_file_path = Path(root) / file
+                relative_path = local_file_path.relative_to(upload_dir)
+                
+                with open(local_file_path, 'rb') as f:
+                    content = f.read()
+                
+                s3_key = upload_file_to_s3(job_id, request.dataset_name, str(relative_path), content)
+        
+        # Store dataset info with job ID and S3 path
+        s3_path = f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/{request.dataset_name}/"
+        dataset_paths[request.dataset_name] = {
+            "job_id": job_id,
+            "s3_path": s3_path,
+            "local_path": str(upload_dir)
+        }
+        job_ids[request.dataset_name] = job_id
+        
+        # Mark ingestion as starting
+        ingestion_status[request.dataset_name] = "in_progress"
+        
+        # Return immediately - run ingestion in background
+        print(f"Dataset downloaded from user S3. Starting background ingestion for dataset: {request.dataset_name}")
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def run_full_ingestion():
+                """Run both basic ingestion and full pipeline in background."""
+                try:
+                    # Find scripts/ folder - check multiple locations
+                    current_dir = Path(__file__).parent
+                    scripts_in_current = current_dir / "scripts"
+                    scripts_parent = current_dir.parent
+                    scripts_in_parent = scripts_parent / "scripts"
+                    
+                    if scripts_in_current.exists() and scripts_in_current.is_dir():
+                        if str(current_dir) not in sys.path:
+                            sys.path.insert(0, str(current_dir))
+                            print(f"Using scripts from current directory: {scripts_in_current}")
+                    elif scripts_in_parent.exists() and scripts_in_parent.is_dir():
+                        if str(scripts_parent) not in sys.path:
+                            sys.path.insert(0, str(scripts_parent))
+                        print(f"Using scripts from parent directory: {scripts_in_parent}")
+                    elif str(project_root) not in sys.path:
+                        sys.path.insert(0, str(project_root))
+                        print(f"Using project_root: {project_root}")
+                    
+                    # Run basic ingestion first
+                    from scripts.ingest_lerobot_dataset import ingest_dataset
+                    count = ingest_dataset(str(upload_dir), None, request.dataset_name)
+                    print(f"Basic ingestion completed: {count} episodes")
+                    
+                    # Then run the full ingestion pipeline
+                    run_ingestion_for_dataset(request.dataset_name, str(upload_dir), request.dataset_name)
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    print(f"Error in background ingestion for {request.dataset_name}: {error_trace}")
+                    ingestion_status[request.dataset_name] = "failed"
+            
+            # Fire-and-forget: do not await, so upload can succeed immediately
+            loop.run_in_executor(None, run_full_ingestion)
+        except Exception as ingestion_error:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error scheduling ingestion for {request.dataset_name}: {error_trace}")
+            ingestion_status[request.dataset_name] = "failed"
+        
+        return {
+            "success": True,
+            "dataset_name": request.dataset_name,
+            "job_id": job_id,
+            "s3_path": s3_path,
+            "local_path": str(upload_dir),
+            "message": "Dataset downloaded from S3. Ingestion is running in the background."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error uploading dataset from S3: {error_trace}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error uploading dataset from S3: {str(e)}"
+        )
+
+
+@app.post("/api/datasets/upload-huggingface")
+async def upload_dataset_from_huggingface(request: HuggingFaceUploadRequest):
+    """Upload a dataset from Hugging Face."""
+    try:
+        print(f"Received Hugging Face upload request for dataset: {request.dataset_name}")
+        print(f"Hugging Face repo: {request.hf_repo_id}, split: {request.hf_split}")
+        
+        # Generate unique job ID for this upload
+        job_id = generate_job_id()
+        print(f"Generated job ID: {job_id} for dataset: {request.dataset_name}")
+        
+        # Create temporary local directory for download and ingestion
+        if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT") or os.getenv("RAILWAY_ENVIRONMENT"):
+            upload_dir = Path("/tmp") / "uploaded_datasets" / job_id / request.dataset_name
+        else:
+            upload_dir = project_root / "data" / "uploaded_datasets" / job_id / request.dataset_name
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Download dataset from Hugging Face
+        print(f"Downloading dataset from Hugging Face...")
+        download_dataset_from_huggingface(
+            repo_id=request.hf_repo_id,
+            split=request.hf_split,
+            hf_token=request.hf_token,
+            local_path=upload_dir
+        )
+        
+        # Upload to our S3 with job-based organization
+        print(f"Uploading dataset to our S3 storage...")
+        for root, dirs, files in os.walk(upload_dir):
+            for file in files:
+                local_file_path = Path(root) / file
+                relative_path = local_file_path.relative_to(upload_dir)
+                
+                with open(local_file_path, 'rb') as f:
+                    content = f.read()
+                
+                s3_key = upload_file_to_s3(job_id, request.dataset_name, str(relative_path), content)
+        
+        # Store dataset info with job ID and S3 path
+        s3_path = f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/{request.dataset_name}/"
+        dataset_paths[request.dataset_name] = {
+            "job_id": job_id,
+            "s3_path": s3_path,
+            "local_path": str(upload_dir)
+        }
+        job_ids[request.dataset_name] = job_id
+        
+        # Mark ingestion as starting
+        ingestion_status[request.dataset_name] = "in_progress"
+        
+        # Return immediately - run ingestion in background
+        print(f"Dataset downloaded from Hugging Face. Starting background ingestion for dataset: {request.dataset_name}")
+        try:
+            loop = asyncio.get_running_loop()
+            
+            def run_full_ingestion():
+                """Run both basic ingestion and full pipeline in background."""
+                try:
+                    # Find scripts/ folder - check multiple locations
+                    current_dir = Path(__file__).parent
+                    scripts_in_current = current_dir / "scripts"
+                    scripts_parent = current_dir.parent
+                    scripts_in_parent = scripts_parent / "scripts"
+                    
+                    if scripts_in_current.exists() and scripts_in_current.is_dir():
+                        if str(current_dir) not in sys.path:
+                            sys.path.insert(0, str(current_dir))
+                            print(f"Using scripts from current directory: {scripts_in_current}")
+                    elif scripts_in_parent.exists() and scripts_in_parent.is_dir():
+                        if str(scripts_parent) not in sys.path:
+                            sys.path.insert(0, str(scripts_parent))
+                        print(f"Using scripts from parent directory: {scripts_in_parent}")
+                    elif str(project_root) not in sys.path:
+                        sys.path.insert(0, str(project_root))
+                        print(f"Using project_root: {project_root}")
+                    
+                    # Run basic ingestion first
+                    from scripts.ingest_lerobot_dataset import ingest_dataset
+                    count = ingest_dataset(str(upload_dir), None, request.dataset_name)
+                    print(f"Basic ingestion completed: {count} episodes")
+                    
+                    # Then run the full ingestion pipeline
+                    run_ingestion_for_dataset(request.dataset_name, str(upload_dir), request.dataset_name)
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    print(f"Error in background ingestion for {request.dataset_name}: {error_trace}")
+                    ingestion_status[request.dataset_name] = "failed"
+            
+            # Fire-and-forget: do not await, so upload can succeed immediately
+            loop.run_in_executor(None, run_full_ingestion)
+        except Exception as ingestion_error:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error scheduling ingestion for {request.dataset_name}: {error_trace}")
+            ingestion_status[request.dataset_name] = "failed"
+        
+        return {
+            "success": True,
+            "dataset_name": request.dataset_name,
+            "job_id": job_id,
+            "s3_path": s3_path,
+            "local_path": str(upload_dir),
+            "message": "Dataset downloaded from Hugging Face. Ingestion is running in the background."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error uploading dataset from Hugging Face: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error uploading dataset from Hugging Face: {str(e)}"
         )
 
 @app.get("/api/datasets/{dataset_name}/ingestion-status")
