@@ -56,15 +56,14 @@ export default function Home() {
   const [datasetName, setDatasetName] = useState('')
   const [uploadLoading, setUploadLoading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
-  const [uploadMode, setUploadMode] = useState<'local' | 's3' | 'user-s3' | 'huggingface'>('local')
+  const [uploadMode, setUploadMode] = useState<'local' | 's3' | 'huggingface'>('local')
   const [uploadedFiles, setUploadedFiles] = useState<FileList | null>(null)
-  const [s3Path, setS3Path] = useState('')
   
   // S3 credentials state
   const [s3AccessKey, setS3AccessKey] = useState('')
   const [s3SecretKey, setS3SecretKey] = useState('')
   const [s3Bucket, setS3Bucket] = useState('')
-  const [s3Region, setS3Region] = useState('us-east-1')
+  const [s3Region, setS3Region] = useState('')
   const [s3UserPath, setS3UserPath] = useState('')
   
   // Hugging Face state
@@ -117,8 +116,7 @@ export default function Home() {
   
   const handleLoadDataset = async () => {
     if (uploadMode === 'local' && !uploadedFiles) return
-    if (uploadMode === 's3' && !s3Path) return
-    if (uploadMode === 'user-s3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) return
+    if (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) return
     if (uploadMode === 'huggingface' && !hfRepoId) return
     
     // Auto-generate dataset name if not set
@@ -128,10 +126,7 @@ export default function Home() {
         const firstFile = uploadedFiles[0]
         const relativePath = (firstFile as any).webkitRelativePath || firstFile.name
         finalDatasetName = relativePath.split('/')[0]
-      } else if (uploadMode === 's3' && s3Path) {
-        const pathParts = s3Path.replace('s3://', '').split('/').filter(p => p)
-        finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
-      } else if (uploadMode === 'user-s3' && s3UserPath) {
+      } else if (uploadMode === 's3' && s3UserPath) {
         const pathParts = s3UserPath.split('/').filter(p => p)
         finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
       } else if (uploadMode === 'huggingface' && hfRepoId) {
@@ -168,19 +163,6 @@ export default function Home() {
           body: formData,
         })
       } else if (uploadMode === 's3') {
-        // S3 path (existing functionality)
-        response = await fetch(`${API_BASE}/api/datasets/load`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dataset_path: s3Path,
-            dataset_name: finalDatasetName,
-            environment: environment || null,
-            axes: selectedAxes.length > 0 ? selectedAxes : null,
-            is_s3: true,
-          }),
-        })
-      } else if (uploadMode === 'user-s3') {
         // User's S3 bucket with credentials
         response = await fetch(`${API_BASE}/api/datasets/upload-s3`, {
           method: 'POST',
@@ -712,7 +694,6 @@ export default function Home() {
                       setUploadMode('local')
                       setUploadedFiles(null)
                       setDatasetPath('')
-                      setS3Path('')
                     }}
                     className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
                       uploadMode === 'local'
@@ -742,27 +723,9 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
-                      setUploadMode('user-s3')
-                      setUploadedFiles(null)
-                      setDatasetPath('')
-                      setS3Path('')
-                    }}
-                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
-                      uploadMode === 'user-s3'
-                        ? 'bg-[#4b6671] text-white'
-                        : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                    }`}
-                  >
-                    <Cloud className="w-3 h-3" />
-                    Your S3
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
                       setUploadMode('huggingface')
                       setUploadedFiles(null)
                       setDatasetPath('')
-                      setS3Path('')
                     }}
                     className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
                       uploadMode === 'huggingface'
@@ -803,31 +766,8 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* S3 Path Input */}
+                {/* S3 Credentials */}
                 {uploadMode === 's3' && (
-                  <input
-                    type="text"
-                    placeholder="s3://bucket-name/path/to/dataset"
-                    value={s3Path}
-                    onChange={(e) => {
-                      const path = e.target.value
-                      setS3Path(path)
-                      setDatasetPath(path)
-                      // Auto-generate dataset name from S3 path (last part)
-                      if (path) {
-                        const pathParts = path.replace('s3://', '').split('/').filter(p => p)
-                        const datasetNameFromPath = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
-                        setDatasetName(datasetNameFromPath)
-                      } else {
-                        setDatasetName('')
-                      }
-                    }}
-                    className="w-[576px] px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                  />
-                )}
-
-                {/* User S3 Credentials */}
-                {uploadMode === 'user-s3' && (
                   <div className="flex flex-col gap-2 w-[576px]">
                     <div className="grid grid-cols-2 gap-2">
                       <input
@@ -1013,8 +953,7 @@ export default function Home() {
                 disabled={
                   uploadLoading || 
                   (uploadMode === 'local' && !uploadedFiles) || 
-                  (uploadMode === 's3' && !s3Path) ||
-                  (uploadMode === 'user-s3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) ||
+                  (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) ||
                   (uploadMode === 'huggingface' && !hfRepoId)
                 }
                 className="w-1/4 px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
