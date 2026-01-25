@@ -1,18 +1,19 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Settings, X, LogOut } from 'lucide-react'
+import { Plus, Settings, X, LogOut, CreditCard } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface SideMenuProps {
   onAddTask: () => void
   onOpenSettings: () => void
+  onOpenBilling: () => void
   onLogout: () => void
   isOpen: boolean
   onToggle: () => void
 }
 
-export default function SideMenu({ onAddTask, onOpenSettings, onLogout, isOpen, onToggle }: SideMenuProps) {
+export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onLogout, isOpen, onToggle }: SideMenuProps) {
 
   return (
     <>
@@ -67,6 +68,17 @@ export default function SideMenu({ onAddTask, onOpenSettings, onLogout, isOpen, 
             >
               <Settings className="w-4 h-4" />
               Settings
+            </button>
+
+            <button
+              onClick={() => {
+                onOpenBilling()
+                onToggle()
+              }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-[#d4d4d4] hover:text-[#e3e8f0] transition-colors"
+            >
+              <CreditCard className="w-4 h-4" />
+              Billing
             </button>
 
             <button

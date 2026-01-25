@@ -46,6 +46,7 @@ class User(Base):
     first_name = Column(String)
     last_name = Column(String)
     hashed_password = Column(String)
+    credits = Column(String, default="1000")  # Store as string to handle large numbers
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationship to credentials
@@ -132,7 +133,7 @@ def get_user_by_id(db: Session, user_id: str):
     return db.query(User).filter(User.id == user_id).first()
 
 def create_user(db: Session, email: str, first_name: str, last_name: str, password: str):
-    """Create a new user."""
+    """Create a new user with 1000 free trial credits."""
     import uuid
     hashed_password = get_password_hash(password)
     user = User(
@@ -140,7 +141,8 @@ def create_user(db: Session, email: str, first_name: str, last_name: str, passwo
         email=email,
         first_name=first_name,
         last_name=last_name,
-        hashed_password=hashed_password
+        hashed_password=hashed_password,
+        credits="1000"  # Free trial credits
     )
     db.add(user)
     db.commit()

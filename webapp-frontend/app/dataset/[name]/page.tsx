@@ -12,6 +12,7 @@ import TestingPanel from '@/components/TestingPanel'
 import SideMenu from '@/components/SideMenu'
 import TaskModal, { TaskData } from '@/components/TaskModal'
 import SettingsModal, { SettingsData } from '@/components/SettingsModal'
+import BillingModal from '@/components/BillingModal'
 import LoginModal from '@/components/LoginModal'
 import RegisterModal from '@/components/RegisterModal'
 import { useAuth } from '@/contexts/AuthContext'
@@ -48,8 +49,10 @@ export default function DatasetPage() {
   const [analysisView, setAnalysisView] = useState<'original' | 'new'>('original')
   const [analysisSwitchEnabled, setAnalysisSwitchEnabled] = useState(false)
   
-  // Distributions state
+  // Distributions state - separate for original and new views
   const [aresDistributions, setAresDistributions] = useState<Visualization[]>([])
+  const [newDistributions, setNewDistributions] = useState<Visualization[]>([])
+  const [variationsIncluded, setVariationsIncluded] = useState(false)
   
   // Authentication
   const { user, isAuthenticated, loading: authLoading, logout } = useAuth()
@@ -183,7 +186,7 @@ export default function DatasetPage() {
       return
     }
     
-    console.log('[FRONTEND] Making distributions call - Environment:', environment, 'Axes:', selectedAxes, 'Existing vizs:', aresDistributions.length)
+    console.log('[FRONTEND] Making distributions call - Environment:', environment, 'Axes:', selectedAxes, 'View:', analysisView)
 
     const loadDistributions = async () => {
       try {
@@ -199,25 +202,44 @@ export default function DatasetPage() {
         }
         // Always send axes parameter, even if empty, so backend knows user's selection
         params.append('axes', JSON.stringify(selectedAxes))
+        // Include variations only for 'new' view
+        if (analysisView === 'new') {
+          params.append('include_variations', 'true')
+        } else {
+          params.append('include_variations', 'false')
+        }
         
         const url = `${API_BASE}/api/ares/distributions${params.toString() ? '?' + params.toString() : ''}`
         const distResponse = await fetch(url)
         if (distResponse.ok) {
           const distData = await distResponse.json()
           const vizs = distData.visualizations || []
-          console.log('[FRONTEND] Received distributions:', vizs.length, 'visualizations')
+          const variationsIncluded = distData.variations_included || false
+          console.log('[FRONTEND] Received distributions:', vizs.length, 'visualizations for', analysisView, 'view')
           console.log('[FRONTEND] Distribution titles:', vizs.map((v: any) => v.title))
-          console.log('[FRONTEND] Current state before update:', aresDistributions.length, 'existing visualizations')
-          // Only update state if we got visualizations, or if we explicitly want to clear
-          // This prevents empty responses from overwriting good visualizations
-          if (vizs.length > 0) {
-            setAresDistributions(vizs)
+          console.log('[FRONTEND] Variations included:', variationsIncluded)
+          
+          // Update the appropriate state based on view
+          if (analysisView === 'new') {
+            if (vizs.length > 0) {
+              setNewDistributions(vizs)
+              setVariationsIncluded(variationsIncluded)
+            } else {
+              console.log('[FRONTEND] Skipping new distributions update - received 0 visualizations')
+              setVariationsIncluded(false)
+            }
           } else {
-            console.log('[FRONTEND] Skipping state update - received 0 visualizations, keeping existing:', aresDistributions.length)
-            // Don't overwrite existing distributions with empty array
+            if (vizs.length > 0) {
+              setAresDistributions(vizs)
+            } else {
+              console.log('[FRONTEND] Skipping original distributions update - received 0 visualizations, keeping existing:', aresDistributions.length)
+            }
           }
         } else {
           console.error('Failed to load distributions:', distResponse.status, distResponse.statusText)
+          if (analysisView === 'new') {
+            setVariationsIncluded(false)
+          }
         }
       } catch (err: any) {
         console.error('Error loading distributions:', err)
@@ -227,7 +249,7 @@ export default function DatasetPage() {
     }
     
     loadDistributions()
-  }, [ingestionComplete, datasetName, environment, selectedAxes])
+  }, [ingestionComplete, datasetName, environment, selectedAxes, analysisView])
 
   // Check ingestion status and wait for completion before showing page
   useEffect(() => {
@@ -527,6 +549,7 @@ export default function DatasetPage() {
         onToggle={() => setIsSideMenuOpen(!isSideMenuOpen)}
         onAddTask={() => router.push('/')}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onOpenBilling={() => setIsBillingModalOpen(true)}
         onLogout={() => {
           logout()
           setIsLoginModalOpen(true)
@@ -641,11 +664,17 @@ export default function DatasetPage() {
               )}
               {analysisView === 'new' && (
                 <>
-                  {/* For now, show the same content as Original */}
                   <DatasetOverview datasetInfo={datasetInfo} />
+                  {!variationsIncluded && !distributionsLoading && (
+                    <div className="bg-[#2a2a2a] border border-[#3a3a3a] p-4 rounded">
+                      <p className="text-[#9aa4b5] text-xs">
+                        Run augmentation to see updated distributions.
+                      </p>
+                    </div>
+                  )}
                   <DatasetDistributions 
                     datasetName={datasetName} 
-                    aresDistributions={aresDistributions}
+                    aresDistributions={newDistributions}
                     loading={distributionsLoading}
                   />
                   <EpisodePreview datasetData={datasetData} />

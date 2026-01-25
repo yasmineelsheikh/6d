@@ -12,6 +12,7 @@ import TestingPanel from '@/components/TestingPanel'
 import SideMenu from '@/components/SideMenu'
 import TaskModal, { TaskData } from '@/components/TaskModal'
 import SettingsModal, { SettingsData } from '@/components/SettingsModal'
+import BillingModal from '@/components/BillingModal'
 import LoginModal from '@/components/LoginModal'
 import RegisterModal from '@/components/RegisterModal'
 import { useAuth } from '@/contexts/AuthContext'
@@ -617,6 +618,7 @@ export default function Home() {
           window.location.reload()
         }}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onOpenBilling={() => setIsBillingModalOpen(true)}
         onLogout={() => {
           logout()
           setIsLoginModalOpen(true)
@@ -637,6 +639,12 @@ export default function Home() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         onSave={handleSaveSettings}
+      />
+
+      {/* Billing Modal */}
+      <BillingModal
+        isOpen={isBillingModalOpen}
+        onClose={() => setIsBillingModalOpen(false)}
       />
 
       {/* Header */}
