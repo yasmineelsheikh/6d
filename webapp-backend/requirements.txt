@@ -66,5 +66,3 @@ tf-keras
 # Optional: MongoDB (only if using MongoDB instead of PostgreSQL)
 pymongo
 
-# Optional: Google Cloud AI (only if using Gemini via Vertex AI)
-# google-cloud-aiplatform
