@@ -62,7 +62,6 @@ export default function Home() {
   const [ingestionStatus, setIngestionStatus] = useState<'in_progress' | 'complete' | 'failed' | null>(null)
   const [ingestingDatasetName, setIngestingDatasetName] = useState<string | null>(null)
   const [ingestionProgress, setIngestionProgress] = useState(0)
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   
   // Plot configuration state
   const [environment, setEnvironment] = useState<'Indoor' | 'Outdoor' | ''>('')
@@ -190,28 +189,20 @@ export default function Home() {
         throw new Error(errorMessage)
       }
 
-      // Upload successful - extract job_id and start polling for ingestion status
-      const responseData = await response.json()
-      const jobId = responseData.job_id
-      
-      if (!jobId) {
-        throw new Error('No job_id returned from server')
-      }
-      
+      // Upload successful - start polling for ingestion status
       setUploadSuccess(true)
       setIngestingDatasetName(finalDatasetName)
-      setCurrentJobId(jobId)
       setIngestionStatus('in_progress')
       setIngestionProgress(10) // Start at 10%
       
-      // Poll for ingestion completion using job_id
+      // Poll for ingestion completion
       const pollIngestionStatus = async () => {
         const maxAttempts = 300 // 5 minutes max (300 * 1 second)
         let attempts = 0
         
         const checkStatus = async (): Promise<void> => {
           try {
-            const statusResponse = await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/status`)
+            const statusResponse = await fetch(`${API_BASE}/api/datasets/${encodeURIComponent(finalDatasetName)}/ingestion-status`)
             if (statusResponse.ok) {
               const statusData = await statusResponse.json()
               const status = statusData.status
@@ -236,18 +227,14 @@ export default function Home() {
                 return
               } else if (status === 'failed') {
                 setIngestionStatus('failed')
-                setError(statusData.error || 'Dataset ingestion failed. Please try again.')
+                setError('Dataset ingestion failed. Please try again.')
                 setUploadLoading(false)
                 return
-              } else if (status === 'in_progress' || status === 'processing' || status === 'uploading') {
+              } else if (status === 'in_progress') {
                 setIngestionStatus('in_progress')
-                // Use actual progress from job tracking if available, otherwise simulate
-                const filesUploaded = statusData.files_uploaded || 0
-                const totalFiles = statusData.total_files || 1
-                const uploadProgress = totalFiles > 0 ? Math.min(50, (filesUploaded / totalFiles) * 50) : 0
-                // Simulate processing progress (50-90%) while processing
-                const processingProgress = status === 'processing' ? Math.min(90, 50 + (attempts * 0.3)) : uploadProgress
-                setIngestionProgress(processingProgress)
+                // Simulate progress (0-90%) while in progress
+                const progress = Math.min(90, 10 + (attempts * 0.5))
+                setIngestionProgress(progress)
                 attempts++
                 if (attempts < maxAttempts) {
                   setTimeout(checkStatus, 1000) // Poll every 1 second
@@ -256,7 +243,7 @@ export default function Home() {
                   setUploadLoading(false)
                 }
               } else {
-                // Unknown status - wait a bit and check again
+                // not_started - wait a bit and check again
                 attempts++
                 if (attempts < maxAttempts) {
                   setTimeout(checkStatus, 1000)
