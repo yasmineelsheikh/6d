@@ -9,6 +9,7 @@ import sys
 import tempfile
 import importlib.util
 import asyncio
+import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import traceback
@@ -419,25 +420,13 @@ async def clear_database():
 
 # Configuration
 POD_API_URL = "https://g6hxoyusgab5l4-8000.proxy.runpod.net/run-json"
-S3_BUCKET = "6d-temp-storage"
-S3_REGION = "us-west-2"
+S3_BUCKET = os.getenv("S3_BUCKET", "6d-temp-storage")
+S3_REGION = os.getenv("S3_REGION", "us-west-2")
 s3 = boto3.client("s3", region_name=S3_REGION)
 
-# Supabase Storage configuration (for datasets and prompts).
-# We talk directly to the Supabase Storage REST API using requests,
-# instead of relying on the supabase-py client (which can be brittle
-# in serverless environments).
-SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "datasets")
-# Convenience flag: whether Supabase Storage is usable
-SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
-
-if not SUPABASE_ENABLED:
-    print(
-        "Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set. "
-        "Supabase Storage operations will not be available."
-    )
+# S3 Storage configuration - all dataset storage uses S3 with job-based organization
+# Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/...
+S3_JOBS_PREFIX = "jobs"
 
 # Use /tmp on Vercel/serverless, otherwise use home directory for local dev
 if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
@@ -447,10 +436,13 @@ else:
 
 os.makedirs(tmp_dump_dir, exist_ok=True)
 
-# Store dataset paths in memory (dataset_name -> dataset_path)
-dataset_paths: Dict[str, str] = {}
+# Store dataset paths and job info in memory
+# dataset_name -> {"job_id": str, "s3_path": str, "local_path": str}
+dataset_paths: Dict[str, Dict[str, str]] = {}
 # Track ingestion status per dataset: "in_progress", "complete", or None (not started)
 ingestion_status: Dict[str, str] = {}
+# Track job IDs per dataset: dataset_name -> job_id
+job_ids: Dict[str, str] = {}
 
 # Request/Response models
 class DatasetLoadRequest(BaseModel):
@@ -476,108 +468,126 @@ class DatasetInfo(BaseModel):
     robot_type: str
     dataset_name: str
 
-# Helper functions
-def _ensure_supabase_storage_config() -> None:
-    """Validate that Supabase Storage is configured."""
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+# Helper functions for S3 Storage with job-based organization
+def generate_job_id() -> str:
+    """Generate a unique job ID for each upload."""
+    return str(uuid.uuid4())
+
+
+def upload_file_to_s3(job_id: str, dataset_name: str, file_path: str, file_content: bytes) -> str:
+    """
+    Upload a file to S3 with job-based organization.
+    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/{file_path}
+    """
+    # Ensure no leading slash in file_path
+    object_path = file_path.lstrip("/")
+    # Build S3 key: jobs/{job_id}/{dataset_name}/{file_path}
+    s3_key = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/{object_path}".replace("\\", "/")
+    
+    try:
+        s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=file_content
+        )
+        return s3_key
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail="Supabase Storage is not configured. "
-                   "Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+            detail=f"Error uploading to S3: {str(e)}"
         )
 
 
-def upload_file_to_supabase(file_path: str, file_content: bytes, bucket: str = "datasets") -> str:
-    """Upload a file to Supabase Storage via REST API."""
-    _ensure_supabase_storage_config()
-
-    bucket_name = bucket or SUPABASE_STORAGE_BUCKET
-    base_url = SUPABASE_URL.rstrip("/")
-    # Ensure no leading slash in file_path
+def download_file_from_s3(job_id: str, dataset_name: str, file_path: str) -> bytes:
+    """
+    Download a file from S3 with job-based organization.
+    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/{file_path}
+    """
     object_path = file_path.lstrip("/")
-    url = f"{base_url}/storage/v1/object/{bucket_name}/{object_path}"
-
-    headers = {
-        # Supabase Storage requires both Authorization and apikey headers
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Content-Type": "application/octet-stream",
-    }
-    params = {"upsert": "true"}
-
+    s3_key = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/{object_path}".replace("\\", "/")
+    
     try:
-        resp = requests.post(url, params=params, data=file_content, headers=headers, timeout=60)
-        if not resp.ok:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Supabase Storage upload failed ({resp.status_code}): {resp.text}",
-            )
-        return object_path
-    except HTTPException:
-        raise
+        response = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
+        return response['Body'].read()
+    except s3.exceptions.NoSuchKey:
+        raise HTTPException(
+            status_code=404,
+            detail=f"File not found in S3: {s3_key}"
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error uploading to Supabase Storage: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading from S3: {str(e)}"
+        )
 
 
-def download_file_from_supabase(file_path: str, bucket: str = "datasets") -> bytes:
-    """Download a file from Supabase Storage via REST API."""
-    _ensure_supabase_storage_config()
-
-    bucket_name = bucket or SUPABASE_STORAGE_BUCKET
-    base_url = SUPABASE_URL.rstrip("/")
-    object_path = file_path.lstrip("/")
-    url = f"{base_url}/storage/v1/object/{bucket_name}/{object_path}"
-
-    headers = {
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-    }
-
+def list_files_in_s3(job_id: str, dataset_name: str, folder_path: str = "") -> List[Dict[str, Any]]:
+    """
+    List all files in an S3 folder with job-based organization.
+    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/{folder_path}
+    """
+    prefix = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/"
+    if folder_path:
+        prefix += folder_path.rstrip("/") + "/"
+    
     try:
-        resp = requests.get(url, headers=headers, timeout=60)
-        if not resp.ok:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Supabase Storage download failed ({resp.status_code}): {resp.text}",
-            )
-        return resp.content
-    except HTTPException:
-        raise
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=prefix)
+        
+        files = []
+        for page in pages:
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    # Extract relative path from S3 key
+                    relative_path = obj['Key'][len(prefix):]
+                    files.append({
+                        'name': relative_path,
+                        'key': obj['Key'],
+                        'size': obj['Size'],
+                        'last_modified': obj['LastModified'].isoformat() if 'LastModified' in obj else None
+                    })
+        return files
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading from Supabase Storage: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing S3 files: {str(e)}"
+        )
 
 
-def list_files_in_supabase(folder_path: str, bucket: str = "datasets") -> List[Dict[str, Any]]:
-    """List all files in a Supabase Storage folder via REST API."""
-    _ensure_supabase_storage_config()
-
-    bucket_name = bucket or SUPABASE_STORAGE_BUCKET
-    base_url = SUPABASE_URL.rstrip("/")
-    url = f"{base_url}/storage/v1/object/list/{bucket_name}"
-
-    headers = {
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Content-Type": "application/json",
-    }
-    # Supabase Storage list endpoint expects a JSON body
-    body = {
-        "prefix": folder_path.rstrip("/") if folder_path else "",
-        "limit": 1000,
-    }
-
+def download_dataset_from_s3(job_id: str, dataset_name: str, local_path: Path) -> Path:
+    """
+    Download entire dataset from S3 to local path for ingestion.
+    Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/
+    """
+    prefix = f"{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/"
+    local_path.mkdir(parents=True, exist_ok=True)
+    
     try:
-        resp = requests.post(url, json=body, headers=headers, timeout=60)
-        if not resp.ok:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Supabase Storage list failed ({resp.status_code}): {resp.text}",
-            )
-        return resp.json()
-    except HTTPException:
-        raise
+        paginator = s3.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=prefix)
+        
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+            for obj in page['Contents']:
+                s3_key = obj['Key']
+                # Extract relative path from S3 key (remove prefix)
+                relative_path = s3_key[len(prefix):]
+                if not relative_path:
+                    continue
+                
+                local_file_path = local_path / relative_path
+                local_file_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Download file
+                s3.download_file(S3_BUCKET, s3_key, str(local_file_path))
+        
+        return local_path
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error listing Supabase Storage files: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading dataset from S3: {str(e)}"
+        )
 
 
 def upload_folder_to_s3(local_folder_path: str, bucket_name: str, s3_prefix: str = "") -> None:
@@ -958,7 +968,7 @@ async def upload_dataset(
     environment: str = Form(""),
     axes: str = Form("[]")
 ):
-    """Upload a dataset folder from local files."""
+    """Upload a dataset folder from local files. Files are stored in S3 with job-based organization."""
     try:
         print(f"Received upload request for dataset: {dataset_name}")
         print(f"Number of files received: {len(files) if files else 0}")
@@ -969,20 +979,9 @@ async def upload_dataset(
                 detail="No files were uploaded. Please select a folder to upload."
             )
         
-        # Use Supabase Storage if available, otherwise fall back to local filesystem.
-        use_supabase = SUPABASE_ENABLED
-        upload_dir = None
-        
-        if not use_supabase:
-            # Fallback to local filesystem
-            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-                upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
-            else:
-                upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Using local filesystem, upload directory: {upload_dir}")
-        else:
-            print(f"Using Supabase Storage for dataset: {dataset_name}")
+        # Generate unique job ID for this upload
+        job_id = generate_job_id()
+        print(f"Generated job ID: {job_id} for dataset: {dataset_name}")
         
         # Detect root folder name from first file's path
         # webkitRelativePath includes the root folder name (e.g., "my_dataset/data/file.parquet")
@@ -998,8 +997,10 @@ async def upload_dataset(
                     print(f"Detected root folder prefix: {root_folder_prefix}")
                 break
         
-        # Save all uploaded files preserving directory structure
+        # Upload all files to S3 with job-based organization
+        # Structure: s3://{bucket}/jobs/{job_id}/{dataset_name}/{file_path}
         files_saved = 0
+        uploaded_files = []
         for idx, file in enumerate(files):
             try:
                 # Get the relative path from the file's path (if available)
@@ -1021,18 +1022,10 @@ async def upload_dataset(
                 # Read file content
                 content = await file.read()
                 
-                if use_supabase:
-                    # Upload to Supabase Storage
-                    supabase_path = f"{dataset_name}/{file_path}"
-                    upload_file_to_supabase(supabase_path, content, bucket="datasets")
-                    print(f"Uploaded to Supabase Storage: {supabase_path}")
-                else:
-                    # Save to local filesystem
-                    full_path = upload_dir / file_path
-                    full_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(full_path, "wb") as f:
-                        f.write(content)
-                    print(f"Saved file: {full_path}")
+                # Upload to S3 with job-based organization
+                s3_key = upload_file_to_s3(job_id, dataset_name, file_path, content)
+                print(f"Uploaded to S3: {s3_key}")
+                uploaded_files.append(file_path)
                 
                 files_saved += 1
             except Exception as file_error:
@@ -1050,36 +1043,59 @@ async def upload_dataset(
                 detail="No files were uploaded or saved."
             )
         
-        # Validate dataset structure (only if using local filesystem)
-        if not use_supabase:
-            if not (upload_dir / "data").exists() or not (upload_dir / "meta").exists() or not (upload_dir / "videos").exists():
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid LeRobot dataset structure. Directory must contain 'data/', 'meta/', and 'videos/' folders."
-                )
-        else:
-            # For Supabase, create a temporary directory for ingestion to work with
-            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-                upload_dir = Path("/tmp") / "uploaded_datasets" / dataset_name
-            else:
-                upload_dir = project_root / "data" / "uploaded_datasets" / dataset_name
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Created temporary upload directory for ingestion: {upload_dir}")
+        # Validate dataset structure by checking S3 for required folders
+        # Check if data/, meta/, and videos/ folders exist in S3
+        required_folders = ["data", "meta", "videos"]
+        folder_exists = {folder: False for folder in required_folders}
         
-        # Store the dataset path for later use
-        dataset_paths[dataset_name] = str(upload_dir)
+        for file_path in uploaded_files:
+            for folder in required_folders:
+                if file_path.startswith(f"{folder}/"):
+                    folder_exists[folder] = True
+                    break
+        
+        missing_folders = [folder for folder, exists in folder_exists.items() if not exists]
+        if missing_folders:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid LeRobot dataset structure. Missing required folders: {', '.join(missing_folders)}. "
+                       f"Directory must contain 'data/', 'meta/', and 'videos/' folders."
+            )
+        
+        # Create temporary local directory for ingestion
+        # Files will be downloaded from S3 to this location for processing
+        if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT") or os.getenv("RAILWAY_ENVIRONMENT"):
+            upload_dir = Path("/tmp") / "uploaded_datasets" / job_id / dataset_name
+        else:
+            upload_dir = project_root / "data" / "uploaded_datasets" / job_id / dataset_name
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Created temporary upload directory for ingestion: {upload_dir}")
+        
+        # Store dataset info with job ID and S3 path
+        s3_path = f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/{dataset_name}/"
+        dataset_paths[dataset_name] = {
+            "job_id": job_id,
+            "s3_path": s3_path,
+            "local_path": str(upload_dir)
+        }
+        job_ids[dataset_name] = job_id
         
         # Mark ingestion as starting
         ingestion_status[dataset_name] = "in_progress"
         
         # Return immediately - run ingestion in background
-        print(f"Files uploaded successfully. Starting background ingestion for dataset: {dataset_name}")
+        print(f"Files uploaded successfully to S3. Starting background ingestion for dataset: {dataset_name}")
         try:
             loop = asyncio.get_running_loop()
             
             def run_full_ingestion():
                 """Run both basic ingestion and full pipeline in background."""
                 try:
+                    # Download dataset from S3 to local path for ingestion
+                    print(f"Downloading dataset from S3 to local path: {upload_dir}")
+                    download_dataset_from_s3(job_id, dataset_name, upload_dir)
+                    print(f"Dataset downloaded successfully from S3")
+                    
                     # Find scripts/ folder - check multiple locations
                     current_dir = Path(__file__).parent  # webapp-backend/
                     scripts_in_current = current_dir / "scripts"  # webapp-backend/scripts/ (copied for Railway)
@@ -1125,7 +1141,9 @@ async def upload_dataset(
         return {
             "success": True,
             "dataset_name": dataset_name,
-            "dataset_path": str(upload_dir),
+            "job_id": job_id,
+            "s3_path": s3_path,
+            "local_path": str(upload_dir),
             "message": "Upload successful. Ingestion is running in the background."
         }
     except HTTPException:
@@ -1185,7 +1203,12 @@ async def load_dataset(request: DatasetLoadRequest):
         count = ingest_dataset(str(dataset_path), None, request.dataset_name)
         
         # Store the dataset path for later use
-        dataset_paths[request.dataset_name] = str(dataset_path)
+        # For S3 path, use the dataset_path as-is (it's already a local path for S3 loads)
+        dataset_paths[request.dataset_name] = {
+            "job_id": None,  # S3 loads don't have job IDs
+            "s3_path": None,
+            "local_path": str(dataset_path)
+        }
         
         # Run the full ingestion pipeline to populate robot_data.db in the background.
         # This is best-effort for plots; core dataset info and previews do not depend on it.
@@ -1216,7 +1239,8 @@ async def get_dataset_info(dataset_name: str):
         if dataset_name not in dataset_paths:
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
-        dataset_path = dataset_paths[dataset_name]
+        dataset_info_dict = dataset_paths[dataset_name]
+        dataset_path = dataset_info_dict["local_path"]
         dataset_info = load_dataset_info(dataset_path)
         
         # Get episode count from info.json first, fallback to counting parquet files
@@ -1248,7 +1272,8 @@ async def get_dataset_data(dataset_name: str):
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
         # Base dataset path
-        dataset_path = dataset_paths[dataset_name]
+        dataset_info_dict = dataset_paths[dataset_name]
+        dataset_path = dataset_info_dict["local_path"]
         dataset_path_obj = Path(dataset_path)
 
         # Videos directory: each video file is treated as one episode
@@ -1329,7 +1354,8 @@ async def run_augmentation(request: AugmentationRequest):
         if request.dataset_name not in dataset_paths:
             raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset_name}' not found")
 
-        dataset_path = Path(dataset_paths[request.dataset_name])
+        dataset_info_dict = dataset_paths[request.dataset_name]
+        dataset_path = Path(dataset_info_dict["local_path"])
         video_dir = dataset_path / "videos"
 
         if not video_dir.exists():
@@ -1367,23 +1393,24 @@ async def run_augmentation(request: AugmentationRequest):
         
         print(f"Generated {len(variations)} prompt variations")
         
+        # Get job ID for this dataset to organize prompts in S3
+        job_id = job_ids.get(request.dataset_name)
+        if not job_id:
+            # If no job ID exists (e.g., loaded from S3), generate one for this augmentation
+            job_id = generate_job_id()
+            job_ids[request.dataset_name] = job_id
+        
         # Create directory path for saving prompt variations
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         prompt_folder_name = f"{timestamp}_{unique_id}"
-        prompts_base_path = f"prompts/{request.dataset_name}/{prompt_folder_name}"
         
-        # Use Supabase Storage if available, otherwise fall back to local filesystem
-        use_supabase = supabase is not None
-        prompts_dir = None
-        
-        if not use_supabase:
-            # Fallback to local filesystem
-            if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT"):
-                prompts_dir = Path("/tmp") / "prompts" / request.dataset_name / prompt_folder_name
-            else:
-                prompts_dir = project_root / "data" / "prompts" / request.dataset_name / prompt_folder_name
-            prompts_dir.mkdir(parents=True, exist_ok=True)
+        # Create local directory for prompts (for metadata generation)
+        if os.getenv("VERCEL") == "1" or os.getenv("LAMBDA_TASK_ROOT") or os.getenv("RAILWAY_ENVIRONMENT"):
+            prompts_dir = Path("/tmp") / "prompts" / request.dataset_name / prompt_folder_name
+        else:
+            prompts_dir = project_root / "data" / "prompts" / request.dataset_name / prompt_folder_name
+        prompts_dir.mkdir(parents=True, exist_ok=True)
         
         # Get list of video files in sorted order (same order as descriptions were generated)
         video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v'}
@@ -1398,20 +1425,18 @@ async def run_augmentation(request: AugmentationRequest):
         for idx, (axis_changed, variation_text) in enumerate(variations):
             filename = f"variation_{idx+1:04d}.txt"
             
-            if use_supabase:
-                # Upload to Supabase Storage
-                supabase_file_path = f"{prompts_base_path}/{filename}"
-                upload_file_to_supabase(supabase_file_path, variation_text.encode('utf-8'), bucket="datasets")
-                saved_files.append(supabase_file_path)
-                txt_file_path = supabase_file_path
-                print(f"Uploaded variation {idx+1} to Supabase: {supabase_file_path}")
-            else:
-                # Save to local filesystem
-                file_path = prompts_dir / filename
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(variation_text)
-                saved_files.append(str(file_path.relative_to(project_root)))
-                txt_file_path = f"prompts/{request.dataset_name}/{prompt_folder_name}/{filename}"
+            # Save to local filesystem first (for metadata)
+            file_path = prompts_dir / filename
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(variation_text)
+            
+            # Upload to S3 with job-based organization
+            # Structure: s3://{bucket}/jobs/{job_id}/prompts/{dataset_name}/{prompt_folder_name}/{filename}
+            s3_prompt_path = f"prompts/{request.dataset_name}/{prompt_folder_name}/{filename}"
+            upload_file_to_s3(job_id, request.dataset_name, s3_prompt_path, variation_text.encode('utf-8'))
+            saved_files.append(s3_prompt_path)
+            txt_file_path = s3_prompt_path
+            print(f"Uploaded variation {idx+1} to S3: {s3_prompt_path}")
             
             # Get corresponding video path (same index as description)
             if idx < len(video_files):
@@ -1431,29 +1456,25 @@ async def run_augmentation(request: AugmentationRequest):
             print(f"Saved variation {idx+1} (video: {video_relative_path}, axis: {axis_changed})")
         
         # Save metadata JSON file
-        if use_supabase:
-            metadata_file_path = f"{prompts_base_path}/metadata.json"
-            metadata_json = json.dumps(metadata, indent=2)
-            upload_file_to_supabase(metadata_file_path, metadata_json.encode('utf-8'), bucket="datasets")
-            print(f"Uploaded metadata to Supabase: {metadata_file_path}")
-        else:
-            metadata_file = prompts_dir / "metadata.json"
-            with open(metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2)
-            print(f"Saved metadata to {metadata_file}")
-            
-            # Upload entire folder to S3 (only if not using Supabase)
-            s3_prefix = f"input_data/{request.dataset_name}/prompts/{timestamp}_{unique_id}"
-            print(f"Uploading prompt variations folder to S3: {s3_prefix}")
-            upload_folder_to_s3(str(prompts_dir), S3_BUCKET, s3_prefix)
+        metadata_file = prompts_dir / "metadata.json"
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2)
+        print(f"Saved metadata to {metadata_file}")
+        
+        # Upload metadata to S3 with job-based organization
+        metadata_json = json.dumps(metadata, indent=2)
+        s3_metadata_path = f"prompts/{prompt_folder_name}/metadata.json"
+        upload_file_to_s3(job_id, request.dataset_name, s3_metadata_path, metadata_json.encode('utf-8'))
+        print(f"Uploaded metadata to S3: {s3_metadata_path}")
         
         return {
             "success": True,
             "dataset_name": request.dataset_name,
+            "job_id": job_id,
             "descriptions_count": len(descriptions),
             "variations_count": len(variations),
             "saved_files": saved_files,
-            "s3_prefix": s3_prefix,
+            "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/{request.dataset_name}/prompts/{prompt_folder_name}/",
             "message": f"Generated {len(variations)} prompt variations and uploaded to S3"
         }
                 
@@ -1495,7 +1516,8 @@ async def get_episode_video(dataset_name: str, episode_index: int):
             raise HTTPException(status_code=404, detail=f"Dataset '{dataset_name}' not found")
         
         # Serve from the dataset's own videos directory, using sorted video files
-        dataset_path = Path(dataset_paths[dataset_name])
+        dataset_info_dict = dataset_paths[dataset_name]
+        dataset_path = Path(dataset_info_dict["local_path"])
         videos_dir = dataset_path / "videos"
 
         if not videos_dir.exists():
