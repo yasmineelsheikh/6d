@@ -243,9 +243,6 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 rounded">
             <div className="text-xs text-[#8a8a8a] mb-1">Current Credits</div>
             <div className="text-2xl font-semibold text-[#d4d4d4]">{creditsNum.toLocaleString()}</div>
-            <div className="text-xs text-[#8a8a8a] mt-2">
-              1 credit = 1 second of generated video
-            </div>
           </div>
 
           {/* Purchase Credits */}
@@ -274,7 +271,7 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
                   </div>
                   {purchaseCreditsNum > 0 && (
                     <div className="mt-2 text-xs text-[#8a8a8a]">
-                      Cost: ${totalCost} (${costPerCredit.toFixed(2)} per credit)
+                      Cost: ${totalCost}
                     </div>
                   )}
                 </div>
@@ -320,15 +317,6 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
                 {success}
               </div>
             )}
-          </div>
-
-          {/* Info */}
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 rounded text-xs text-[#8a8a8a] space-y-2">
-            <div className="font-medium text-[#d4d4d4] mb-2">Credit System</div>
-            <div>• Each credit corresponds to 1 second of video generated</div>
-            <div>• Credits are deducted when videos are generated</div>
-            <div>• New users receive 1,000 free trial credits</div>
-            <div>• Additional credits cost $0.10 per credit</div>
           </div>
         </div>
       </div>
