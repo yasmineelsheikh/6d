@@ -26,13 +26,14 @@ if POSTGRES_URL and (POSTGRES_URL.startswith("postgres") or is_vercel):
         )
     # Normalize connection string: SQLAlchemy prefers postgresql:// over postgres://
     DATABASE_URL = POSTGRES_URL.replace("postgres://", "postgresql://", 1)
-    # PostgreSQL doesn't need check_same_thread
+    # PostgreSQL engine (no check_same_thread)
     engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
 else:
     # Fallback to SQLite for local development only
     db_path = "./users.db"
     DATABASE_URL = f"sqlite:///{db_path}"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    # SQLite engine requires check_same_thread flag
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
