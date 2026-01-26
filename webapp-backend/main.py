@@ -1746,7 +1746,7 @@ async def upload_dataset(
                     print(f"Stripped root folder prefix, new path: {file_path}")
                 
                 # Read file content
-                content = await file.read()
+                    content = await file.read()
                 
                 # Upload to S3 with job-based organization
                 s3_key = upload_file_to_s3(job_id, dataset_name, file_path, content)
@@ -1860,7 +1860,7 @@ async def upload_dataset(
                         # Last resort: try project_root
                         sys.path.insert(0, str(project_root))
                         print(f"Using project_root: {project_root}")
-                    
+        
                     # Run basic ingestion first
                     from scripts.ingest_lerobot_dataset import ingest_dataset
                     count = ingest_dataset(str(upload_dir), None, dataset_name)
@@ -2367,7 +2367,11 @@ async def get_dataset_distributions(dataset_name: str):
         raise HTTPException(status_code=500, detail=f"Error getting distributions: {str(e)}")
 
 @app.post("/api/augmentation/run")
-async def run_augmentation(request: AugmentationRequest):
+async def run_augmentation(
+    request: AugmentationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Run Cosmos augmentation on a dataset."""
     try:
         import uuid
@@ -2497,16 +2501,90 @@ async def run_augmentation(request: AugmentationRequest):
         upload_file_to_s3(job_id, request.dataset_name, s3_metadata_path, metadata_json.encode('utf-8'))
         print(f"Uploaded metadata to S3: {s3_metadata_path}")
         
-        return {
-            "success": True,
-            "dataset_name": request.dataset_name,
-            "job_id": job_id,
-            "descriptions_count": len(descriptions),
-            "variations_count": len(variations),
-            "saved_files": saved_files,
-            "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/prompts/{prompt_folder_name}/",
-            "message": f"Generated {len(variations)} prompt variations and uploaded to S3"
-        }
+        # Call RunPod serverless to generate videos
+        runpod_serverless_url = os.getenv("RUNPOD_SERVERLESS_URL")
+        backend_api_url = os.getenv("BACKEND_API_URL") or os.getenv("API_BASE_URL")
+        
+        if not runpod_serverless_url:
+            raise HTTPException(
+                status_code=500,
+                detail="RUNPOD_SERVERLESS_URL environment variable not set"
+            )
+        
+        print(f"Calling RunPod serverless endpoint: {runpod_serverless_url}")
+        print(f"Job ID: {job_id}, User ID: {current_user.id}")
+        
+        try:
+            import requests
+            runpod_payload = {
+                "dataset_name": request.dataset_name,
+                "job_id": job_id,
+                "user_id": current_user.id,
+                "backend_api_url": backend_api_url,
+                "prompt_folder_name": prompt_folder_name  # Pass prompt folder name for serverless to use
+            }
+            
+            runpod_response = requests.post(
+                runpod_serverless_url,
+                json=runpod_payload,
+                headers={"Content-Type": "application/json"},
+                timeout=600  # 10 minute timeout for video generation
+            )
+            
+            if runpod_response.status_code != 200:
+                error_detail = runpod_response.text
+                print(f"RunPod serverless error: {runpod_response.status_code} - {error_detail}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"RunPod serverless failed: {error_detail}"
+                )
+            
+            runpod_result = runpod_response.json()
+            print(f"RunPod serverless response: {runpod_result}")
+            
+            # Check if RunPod returned an error
+            if runpod_result.get("status") == "error":
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"RunPod serverless error: {runpod_result.get('message', 'Unknown error')}"
+                )
+            
+            return {
+                "success": True,
+                "dataset_name": request.dataset_name,
+                "job_id": job_id,
+                "descriptions_count": len(descriptions),
+                "variations_count": len(variations),
+                "saved_files": saved_files,
+                "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/prompts/{prompt_folder_name}/",
+                "runpod_result": runpod_result,
+                "s3_url": runpod_result.get("s3_url"),
+                "total_duration_seconds": runpod_result.get("total_duration_seconds", 0.0),
+                "credits_deducted": runpod_result.get("credits_deducted", 0),
+                "message": f"Generated {len(variations)} prompt variations and videos via RunPod"
+            }
+        except requests.exceptions.Timeout:
+            raise HTTPException(
+                status_code=504,
+                detail="RunPod serverless request timed out. Video generation may still be in progress."
+            )
+        except requests.exceptions.RequestException as e:
+            print(f"Error calling RunPod serverless: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to connect to RunPod serverless: {str(e)}"
+            )
+        except requests.exceptions.Timeout:
+            raise HTTPException(
+                status_code=504,
+                detail="RunPod serverless request timed out. Video generation may still be in progress."
+            )
+        except requests.exceptions.RequestException as e:
+            print(f"Error calling RunPod serverless: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to connect to RunPod serverless: {str(e)}"
+            )
                 
     except HTTPException:
         raise
