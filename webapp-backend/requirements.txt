@@ -23,7 +23,7 @@ click
 numpy
 scipy
 psutil
-#
+
 # CPU-only PyTorch (much smaller, ~500MB vs ~2-3GB)
 # Use -f (find-links) to specify CPU wheel repository - must come before torch
 #-f https://download.pytorch.org/whl/cpu
