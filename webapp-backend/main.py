@@ -70,7 +70,7 @@ else:
 # Import auth utilities
 from auth import (
     get_db, create_user, get_user_by_email,
-    verify_password, create_access_token, decode_access_token, User
+    verify_password, get_password_hash, create_access_token, decode_access_token, User
 )
 
 app = FastAPI(title="Ares Platform API", version="1.0.0")
@@ -380,6 +380,111 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         credits=current_user.credits or "1000",
         created_at=current_user.created_at.isoformat() if current_user.created_at else ""
     )
+
+# Settings Models
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+class ChangeEmailRequest(BaseModel):
+    new_email: EmailStr
+    password: str  # Require password confirmation for security
+
+class ChangePasswordResponse(BaseModel):
+    success: bool
+    message: str
+
+class ChangeEmailResponse(BaseModel):
+    success: bool
+    message: str
+    new_email: str
+
+@app.post("/api/auth/change-password", response_model=ChangePasswordResponse)
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Change user password."""
+    try:
+        # Verify current password
+        if not verify_password(request.current_password, current_user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Current password is incorrect"
+            )
+        
+        # Validate new password
+        if len(request.new_password) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be at least 6 characters long."
+            )
+        
+        password_bytes = len(request.new_password.encode('utf-8'))
+        if password_bytes > 72:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password is too long. Maximum length is 72 characters."
+            )
+        
+        # Update password
+        current_user.hashed_password = get_password_hash(request.new_password)
+        db.commit()
+        db.refresh(current_user)
+        
+        return ChangePasswordResponse(
+            success=True,
+            message="Password changed successfully"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error changing password: {str(e)}"
+        )
+
+@app.post("/api/auth/change-email", response_model=ChangeEmailResponse)
+async def change_email(
+    request: ChangeEmailRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Change user email address."""
+    try:
+        # Verify password
+        if not verify_password(request.password, current_user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Password is incorrect"
+            )
+        
+        # Check if new email is already in use
+        existing_user = get_user_by_email(db, request.new_email)
+        if existing_user and existing_user.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already in use by another account"
+            )
+        
+        # Update email
+        current_user.email = request.new_email
+        db.commit()
+        db.refresh(current_user)
+        
+        return ChangeEmailResponse(
+            success=True,
+            message="Email changed successfully",
+            new_email=current_user.email
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error changing email: {str(e)}"
+        )
 
 # Billing Models
 class CreditsResponse(BaseModel):
