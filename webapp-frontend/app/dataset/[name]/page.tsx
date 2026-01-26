@@ -69,6 +69,7 @@ export default function DatasetPage() {
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
+  const [isBillingModalOpen, setIsBillingModalOpen] = useState(false)
   const [tasks, setTasks] = useState<TaskData[]>([])
 
   const handleDatasetLoaded = async (name: string) => {
@@ -570,6 +571,12 @@ export default function DatasetPage() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         onSave={handleSaveSettings}
+      />
+
+      {/* Billing Modal */}
+      <BillingModal
+        isOpen={isBillingModalOpen}
+        onClose={() => setIsBillingModalOpen(false)}
       />
 
       {/* Header */}

@@ -108,6 +108,7 @@ export default function Home() {
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
+  const [isBillingModalOpen, setIsBillingModalOpen] = useState(false)
   const [tasks, setTasks] = useState<TaskData[]>([])
 
   // Debug: verify API base URL at runtime
