@@ -2504,11 +2504,18 @@ async def run_augmentation(
         # Call RunPod serverless to generate videos
         runpod_serverless_url = os.getenv("RUNPOD_SERVERLESS_URL")
         backend_api_url = os.getenv("BACKEND_API_URL") or os.getenv("API_BASE_URL")
-        
+        runpod_api_key = os.getenv("RUNPOD_API_KEY")
+
         if not runpod_serverless_url:
             raise HTTPException(
                 status_code=500,
                 detail="RUNPOD_SERVERLESS_URL environment variable not set"
+            )
+
+        if not runpod_api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="RUNPOD_API_KEY environment variable not set"
             )
         
         print(f"Calling RunPod serverless endpoint: {runpod_serverless_url}")
@@ -2516,19 +2523,25 @@ async def run_augmentation(
         
         try:
             import requests
-            runpod_payload = {
+            # RunPod queue-based endpoints expect payload under 'input'
+            runpod_input = {
                 "dataset_name": request.dataset_name,
                 "job_id": job_id,
                 "user_id": current_user.id,
                 "backend_api_url": backend_api_url,
-                "prompt_folder_name": prompt_folder_name  # Pass prompt folder name for serverless to use
+                "prompt_folder_name": prompt_folder_name,  # Pass prompt folder name for serverless to use
             }
+
+            runpod_payload = {"input": runpod_input}
             
             runpod_response = requests.post(
                 runpod_serverless_url,
                 json=runpod_payload,
-                headers={"Content-Type": "application/json"},
-                timeout=600  # 10 minute timeout for video generation
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {runpod_api_key}",
+                },
+                timeout=600,  # 10 minute timeout for video generation
             )
             
             if runpod_response.status_code != 200:
@@ -2541,12 +2554,15 @@ async def run_augmentation(
             
             runpod_result = runpod_response.json()
             print(f"RunPod serverless response: {runpod_result}")
+
+            # For /runsync endpoints, result is often under 'output'
+            result_body = runpod_result.get("output") if "output" in runpod_result else runpod_result
             
             # Check if RunPod returned an error
-            if runpod_result.get("status") == "error":
+            if result_body.get("status") == "error":
                 raise HTTPException(
                     status_code=500,
-                    detail=f"RunPod serverless error: {runpod_result.get('message', 'Unknown error')}"
+                    detail=f"RunPod serverless error: {result_body.get('message', 'Unknown error')}"
                 )
             
             return {
@@ -2557,23 +2573,12 @@ async def run_augmentation(
                 "variations_count": len(variations),
                 "saved_files": saved_files,
                 "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/prompts/{prompt_folder_name}/",
-                "runpod_result": runpod_result,
-                "s3_url": runpod_result.get("s3_url"),
-                "total_duration_seconds": runpod_result.get("total_duration_seconds", 0.0),
-                "credits_deducted": runpod_result.get("credits_deducted", 0),
+                "runpod_result": result_body,
+                "s3_url": result_body.get("s3_url"),
+                "total_duration_seconds": result_body.get("total_duration_seconds", 0.0),
+                "credits_deducted": result_body.get("credits_deducted", 0),
                 "message": f"Generated {len(variations)} prompt variations and videos via RunPod"
             }
-        except requests.exceptions.Timeout:
-            raise HTTPException(
-                status_code=504,
-                detail="RunPod serverless request timed out. Video generation may still be in progress."
-            )
-        except requests.exceptions.RequestException as e:
-            print(f"Error calling RunPod serverless: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to connect to RunPod serverless: {str(e)}"
-            )
         except requests.exceptions.Timeout:
             raise HTTPException(
                 status_code=504,
