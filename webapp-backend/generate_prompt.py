@@ -300,7 +300,6 @@ async def generate_video_descriptions_with_vlm(
         A list of generated descriptions, one per video file found in the directory.
         Descriptions are returned in alphabetical order by filename.
     """
-    from ares.models.base import GeminiVideoVLM
     from ares.utils.image_utils import split_video_to_frames, choose_and_preprocess_frames
     from ares.models.base import parse_response
     
@@ -317,7 +316,7 @@ async def generate_video_descriptions_with_vlm(
         print(f"Warning: No video files found in directory: {video_dir}")
         return []
     
-    # Generate description for each video
+    # Generate description for each video using the configured VLM (e.g., OpenAI / gpt-4o)
     descriptions: List[str] = []
     total_videos = len(video_files)
     
@@ -330,59 +329,39 @@ async def generate_video_descriptions_with_vlm(
                 "task_description": task_description if task_description else None
             }
             
-            # Use VLM to generate description
-            # For GeminiVideoVLM, we can use video_path directly
-            # For other VLMs, we'll need to extract frames
-            if isinstance(vlm, GeminiVideoVLM):
-                # Use video directly with GeminiVideoVLM
-                # Note: GeminiVideoVLM only has ask(), not ask_async()
-                messages, response = await asyncio.to_thread(
-                    vlm.ask,
-                    info=prompt_info,
-                    prompt_filename="video_description.jinja2",
-                    video_path=str(video_path.absolute())
-                )
-                # GeminiVideoVLM returns a GenerativeModel response (different format)
-                # Extract text from candidates
-                if hasattr(response, 'candidates') and response.candidates:
-                    description = response.candidates[0].content.parts[0].text
-                elif hasattr(response, 'text'):
-                    description = response.text
+            # Use VLM to generate description (OpenAI / non-Gemini path)
+            # Extract frames and use as images for the VLM
+            all_frames = split_video_to_frames(str(video_path.absolute()))
+            # Sample frames evenly
+            frames = choose_and_preprocess_frames(
+                all_frames, 
+                n_frames=min(max_frames, len(all_frames))
+            )
+            # Convert numpy arrays to PIL Images if needed
+            from PIL import Image
+            import numpy as np
+            frame_images = []
+            for frame in frames:
+                if isinstance(frame, np.ndarray):
+                    # Convert BGR to RGB if needed (cv2 uses BGR)
+                    if len(frame.shape) == 3 and frame.shape[2] == 3:
+                        frame = frame[:, :, ::-1]  # BGR to RGB
+                    frame_images.append(Image.fromarray(frame))
+                elif isinstance(frame, str):
+                    frame_images.append(Image.open(frame))
                 else:
-                    description = str(response)
+                    frame_images.append(frame)
+            
+            messages, response = await vlm.ask_async(
+                info=prompt_info,
+                prompt_filename="video_description.jinja2",
+                images=frame_images
+            )
+            # For standard VLM responses (e.g., OpenAI ChatCompletion), parse from choices
+            if hasattr(response, 'choices') and response.choices:
+                description = parse_response(response.choices[0])
             else:
-                # Extract frames and use as images for other VLMs
-                all_frames = split_video_to_frames(str(video_path.absolute()))
-                # Sample frames evenly
-                frames = choose_and_preprocess_frames(
-                    all_frames, 
-                    n_frames=min(max_frames, len(all_frames))
-                )
-                # Convert numpy arrays to PIL Images if needed
-                from PIL import Image
-                import numpy as np
-                frame_images = []
-                for frame in frames:
-                    if isinstance(frame, np.ndarray):
-                        # Convert BGR to RGB if needed (cv2 uses BGR)
-                        if len(frame.shape) == 3 and frame.shape[2] == 3:
-                            frame = frame[:, :, ::-1]  # BGR to RGB
-                        frame_images.append(Image.fromarray(frame))
-                    elif isinstance(frame, str):
-                        frame_images.append(Image.open(frame))
-                    else:
-                        frame_images.append(frame)
-                
-                messages, response = await vlm.ask_async(
-                    info=prompt_info,
-                    prompt_filename="video_description.jinja2",
-                    images=frame_images
-                )
-                # For standard VLM responses, parse from choices
-                if hasattr(response, 'choices') and response.choices:
-                    description = parse_response(response.choices[0])
-                else:
-                    description = str(response)
+                description = str(response)
             
             descriptions.append(description.strip())
             print(f"Successfully generated description for {video_path.name}")
