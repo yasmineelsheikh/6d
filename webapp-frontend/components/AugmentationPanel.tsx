@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Play, Loader2, CheckCircle2 } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''
 
@@ -11,6 +12,7 @@ interface AugmentationPanelProps {
 }
 
 export default function AugmentationPanel({ datasetName, onComplete }: AugmentationPanelProps) {
+  const { token } = useAuth()
   const [taskDescription, setTaskDescription] = useState('')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -22,9 +24,17 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
     setS3Url(null)
 
     try {
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      }
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
+
       const response = await fetch(`${API_BASE}/api/augmentation/run`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           dataset_name: datasetName,
           prompt: '',
@@ -33,8 +43,16 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
       })
 
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Augmentation failed')
+        let errorMessage = 'Augmentation failed'
+        try {
+          const error = await response.json()
+          if (error?.detail) {
+            errorMessage = error.detail
+          }
+        } catch {
+          // ignore JSON parse errors
+        }
+        throw new Error(errorMessage)
       }
 
       const result = await response.json()
@@ -42,7 +60,7 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
       setSuccess(true)
       onComplete(datasetName)
     } catch (error: any) {
-      alert(error.message)
+      alert(error.message || 'Augmentation failed')
     } finally {
       setLoading(false)
     }
