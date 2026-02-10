@@ -60,9 +60,9 @@ python-Levenshtein
 
 # TensorFlow (used in open_x_embodiment_configs and extractor)
 # Note: This is a large package (~500MB), but required for certain dataset types
-tensorflow
+#tensorflow
 tensorflow-datasets
-tf-keras
+#tf-keras
 
 # Optional: MongoDB (only if using MongoDB instead of PostgreSQL)
 pymongo
