@@ -32,7 +32,7 @@ torch==2.1.0
 #torch
 # ML/AI libraries
 transformers
-#sentence-transformers
+sentence-transformers
 litellm
 jinja2
 tenacity
