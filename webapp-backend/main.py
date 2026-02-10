@@ -2502,15 +2502,30 @@ async def run_augmentation(
         print(f"Uploaded metadata to S3: {s3_metadata_path}")
         
         # Call RunPod serverless to generate videos
-        runpod_serverless_url = os.getenv("RUNPOD_SERVERLESS_URL")
+        # runpod_serverless_url = os.getenv("RUNPOD_SERVERLESS_URL")
+        # backend_api_url = os.getenv("BACKEND_API_URL") or os.getenv("API_BASE_URL")
+        # runpod_api_key = os.getenv("RUNPOD_API_KEY")
+
+        # if not runpod_serverless_url:
+        #     raise HTTPException(
+        #         status_code=500,
+        #         detail="RUNPOD_SERVERLESS_URL environment variable not set"
+        #     )
+
+        # if not runpod_api_key:
+        #     raise HTTPException(
+        #         status_code=500,
+        #         detail="RUNPOD_API_KEY environment variable not set"
+        #     )
+        
+        # print(f"Calling RunPod serverless endpoint: {runpod_serverless_url}")
+        # print(f"Job ID: {job_id}, User ID: {current_user.id}")
+        
+        
+        # RunPod Pod Implementation
         backend_api_url = os.getenv("BACKEND_API_URL") or os.getenv("API_BASE_URL")
         runpod_api_key = os.getenv("RUNPOD_API_KEY")
-
-        if not runpod_serverless_url:
-            raise HTTPException(
-                status_code=500,
-                detail="RUNPOD_SERVERLESS_URL environment variable not set"
-            )
+        runpod_pod_id = os.getenv("RUNPOD_POD_ID")
 
         if not runpod_api_key:
             raise HTTPException(
@@ -2518,51 +2533,112 @@ async def run_augmentation(
                 detail="RUNPOD_API_KEY environment variable not set"
             )
         
-        print(f"Calling RunPod serverless endpoint: {runpod_serverless_url}")
-        print(f"Job ID: {job_id}, User ID: {current_user.id}")
-        
-        try:
-            import requests
-            # RunPod queue-based endpoints expect payload under 'input'
-            runpod_input = {
-                "dataset_name": request.dataset_name,
-                "job_id": job_id,
-                "user_id": current_user.id,
-                "backend_api_url": backend_api_url,
-                "prompt_folder_name": prompt_folder_name,  # Pass prompt folder name for serverless to use
-            }
-
-            runpod_payload = {"input": runpod_input}
-            
-            runpod_response = requests.post(
-                runpod_serverless_url,
-                json=runpod_payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {runpod_api_key}",
-                },
-                timeout=600,  # 10 minute timeout for video generation
+        if not runpod_pod_id:
+            raise HTTPException(
+                status_code=500,
+                detail="RUNPOD_POD_ID environment variable not set"
             )
+
+        print(f"Using RunPod pod: {runpod_pod_id}")
+        print(f"Job ID: {job_id}, User ID: {current_user.id}")
+
+        pod_started = False  # Track if we started the pod
+        try:
+            import runpod
+            import time
             
-            if runpod_response.status_code != 200:
-                error_detail = runpod_response.text
-                print(f"RunPod serverless error: {runpod_response.status_code} - {error_detail}")
+            # Configure RunPod API key
+            runpod.api_key = runpod_api_key
+            
+            # Get pod instance
+            print(f"Connecting to RunPod pod {runpod_pod_id}...")
+            pod = runpod.get_pod(runpod_pod_id)
+            
+            if not pod:
                 raise HTTPException(
-                    status_code=500,
-                    detail=f"RunPod serverless failed: {error_detail}"
+                    status_code=404,
+                    detail=f"RunPod pod {runpod_pod_id} not found"
                 )
             
-            runpod_result = runpod_response.json()
-            print(f"RunPod serverless response: {runpod_result}")
-
-            # For /runsync endpoints, result is often under 'output'
-            result_body = runpod_result.get("output") if "output" in runpod_result else runpod_result
+            print(f"Pod status: {pod.get('desiredStatus', 'unknown')}")
             
-            # Check if RunPod returned an error
+            # Start the pod if it's not running
+            if pod.get('desiredStatus') != 'RUNNING':
+                print(f"Starting pod {runpod_pod_id}...")
+                runpod.resume_pod(runpod_pod_id)
+                pod_started = True
+                
+                # Wait for pod to be ready (with timeout)
+                max_wait_time = 300  # 5 minutes
+                wait_interval = 10  # Check every 10 seconds
+                elapsed_time = 0
+                
+                while elapsed_time < max_wait_time:
+                    pod = runpod.get_pod(runpod_pod_id)
+                    pod_status = pod.get('desiredStatus', 'unknown')
+                    runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
+                    
+                    print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
+                    
+                    if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
+                        print("Pod is running!")
+                        break
+                    
+                    time.sleep(wait_interval)
+                    elapsed_time += wait_interval
+                
+                if elapsed_time >= max_wait_time:
+                    raise HTTPException(
+                        status_code=504,
+                        detail=f"Pod {runpod_pod_id} failed to start within {max_wait_time} seconds"
+                    )
+                
+                # Additional wait for services to be fully ready
+                print("Waiting for services to be ready...")
+                time.sleep(30)
+            
+            # Get pod endpoint URL
+            # RunPod pods expose ports via proxy URLs
+            # The format is typically: https://{pod_id}-{port}.proxy.runpod.net
+            # Based on server_gpu.py.bak, it appears to use FastAPI on port 8000
+            pod_endpoint = f"https://{runpod_pod_id}-8000.proxy.runpod.net/run-json-from-prompts"
+            print(f"Pod endpoint: {pod_endpoint}")
+            
+            # Prepare payload for the pod
+            # The server_gpu.py expects a CosmosRequest with dataset_name
+            cosmos_payload = {
+                "dataset_name": request.dataset_name
+            }
+            
+            print(f"Sending augmentation request to pod...")
+            start_time = time.time()
+            
+            # Send request to pod endpoint
+            response = requests.post(
+                pod_endpoint,
+                json=cosmos_payload,
+                timeout=3600,  # 1 hour timeout for video generation
+            )
+            
+            end_time = time.time()
+            total_duration = end_time - start_time
+            
+            if response.status_code != 200:
+                error_detail = response.text
+                print(f"Pod execution error: {response.status_code} - {error_detail}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Pod execution failed: {error_detail}"
+                )
+            
+            result_body = response.json()
+            print(f"Pod execution response: {result_body}")
+            
+            # Check if pod returned an error
             if result_body.get("status") == "error":
                 raise HTTPException(
                     status_code=500,
-                    detail=f"RunPod serverless error: {result_body.get('message', 'Unknown error')}"
+                    detail=f"Pod execution error: {result_body.get('message', 'Unknown error')}"
                 )
             
             return {
@@ -2575,21 +2651,30 @@ async def run_augmentation(
                 "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/prompts/{prompt_folder_name}/",
                 "runpod_result": result_body,
                 "s3_url": result_body.get("s3_url"),
-                "total_duration_seconds": result_body.get("total_duration_seconds", 0.0),
-                "credits_deducted": result_body.get("credits_deducted", 0),
-                "message": f"Generated {len(variations)} prompt variations and videos via RunPod"
+                "total_duration_seconds": total_duration,
+                "message": f"Generated {len(variations)} prompt variations and videos via RunPod pod"
             }
         except requests.exceptions.Timeout:
             raise HTTPException(
                 status_code=504,
-                detail="RunPod serverless request timed out. Video generation may still be in progress."
+                detail="RunPod pod request timed out. Video generation may still be in progress."
             )
         except requests.exceptions.RequestException as e:
-            print(f"Error calling RunPod serverless: {e}")
+            print(f"Error calling RunPod pod: {e}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to connect to RunPod serverless: {str(e)}"
+                detail=f"Failed to connect to RunPod pod: {str(e)}"
             )
+        finally:
+            # Always stop the pod after execution (success or failure)
+            if pod_started:
+                try:
+                    print(f"Stopping pod {runpod_pod_id}...")
+                    runpod.stop_pod(runpod_pod_id)
+                    print(f"Pod {runpod_pod_id} stopped successfully")
+                except Exception as stop_error:
+                    print(f"Warning: Failed to stop pod {runpod_pod_id}: {stop_error}")
+                    # Don't raise here, just log the warning
                 
     except HTTPException:
         raise
