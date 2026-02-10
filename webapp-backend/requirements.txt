@@ -6,7 +6,7 @@ pyarrow
 boto3==1.29.7
 requests==2.31.0
 python-dotenv==1.0.0
-runpod
+#runpod
 stripe==7.0.0
 sqlalchemy==2.0.23
 sqlmodel
@@ -27,12 +27,12 @@ psutil
 
 # CPU-only PyTorch (much smaller, ~500MB vs ~2-3GB)
 # Use -f (find-links) to specify CPU wheel repository - must come before torch
-#-f https://download.pytorch.org/whl/cpu
-#torch==2.1.0
-torch
+-f https://download.pytorch.org/whl/cpu
+torch==2.1.0
+#torch
 # ML/AI libraries
 transformers
-sentence-transformers
+#sentence-transformers
 litellm
 jinja2
 tenacity
@@ -60,9 +60,9 @@ python-Levenshtein
 
 # TensorFlow (used in open_x_embodiment_configs and extractor)
 # Note: This is a large package (~500MB), but required for certain dataset types
-tensorflow
+#tensorflow
 tensorflow-datasets
-tf-keras
+#tf-keras
 
 # Optional: MongoDB (only if using MongoDB instead of PostgreSQL)
 pymongo
