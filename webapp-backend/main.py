@@ -2565,7 +2565,7 @@ async def run_augmentation(
             # Start the pod if it's not running
             if pod.get('desiredStatus') != 'RUNNING':
                 print(f"Starting pod {runpod_pod_id}...")
-                runpod.resume_pod(runpod_pod_id)
+                runpod.resume_pod(runpod_pod_id, gpu_count=1)
                 pod_started = True
                 
                 # Wait for pod to be ready (with timeout)
