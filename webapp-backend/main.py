@@ -2574,15 +2574,15 @@ async def run_augmentation(
                 elapsed_time = 0
                 
                 while elapsed_time < max_wait_time:
-                    pod = runpod.get_pod(runpod_pod_id)
-                    pod_status = pod.get('desiredStatus', 'unknown')
-                    runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
+                    #pod = runpod.get_pod(runpod_pod_id)
+                    #pod_status = pod.get('desiredStatus', 'unknown')
+                    #runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
                     
-                    print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
                     
-                    if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
-                        print("Pod is running!")
-                        break
+                    #print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
+                    #if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
+                    #    print("Pod is running!")
+                    #    break
                     
                     time.sleep(wait_interval)
                     elapsed_time += wait_interval
