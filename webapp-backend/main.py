@@ -2522,7 +2522,7 @@ async def run_augmentation(
         # print(f"Job ID: {job_id}, User ID: {current_user.id}")
         
         
-        # RunPod Pod Implementation
+        # --- START RUNPOD POD IMPLEMENTATION (ACTIVE) ---
         backend_api_url = os.getenv("BACKEND_API_URL") or os.getenv("API_BASE_URL")
         runpod_api_key = os.getenv("RUNPOD_API_KEY")
         runpod_pod_id = os.getenv("RUNPOD_POD_ID")
@@ -2574,15 +2574,15 @@ async def run_augmentation(
                 elapsed_time = 0
                 
                 while elapsed_time < max_wait_time:
-                    #pod = runpod.get_pod(runpod_pod_id)
-                    #pod_status = pod.get('desiredStatus', 'unknown')
-                    #runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
+                    pod = runpod.get_pod(runpod_pod_id)
+                    pod_status = pod.get('desiredStatus', 'unknown')
+                    runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
                     
+                    print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
                     
-                    #print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
-                    #if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
-                    #    print("Pod is running!")
-                    #    break
+                    if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
+                        print("Pod is running!")
+                        break
                     
                     time.sleep(wait_interval)
                     elapsed_time += wait_interval
@@ -2675,7 +2675,205 @@ async def run_augmentation(
                 except Exception as stop_error:
                     print(f"Warning: Failed to stop pod {runpod_pod_id}: {stop_error}")
                     # Don't raise here, just log the warning
-                
+        # --- END RUNPOD POD IMPLEMENTATION ---
+        
+        # --- START BREV IMPLEMENTATION (COMMENTED OUT) ---
+        # brev_workspace_name = os.getenv("BREV_WORKSPACE_NAME")
+        # brev_endpoint = os.getenv("BREV_ENDPOINT_URL")
+        # 
+        # if not brev_workspace_name:
+        #     raise HTTPException(
+        #         status_code=500,
+        #         detail="BREV_WORKSPACE_NAME environment variable not set"
+        #     )
+        # 
+        # if not brev_endpoint:
+        #     raise HTTPException(
+        #         status_code=500,
+        #         detail="BREV_ENDPOINT_URL environment variable not set"
+        #     )
+        # 
+        # print(f"Using NVIDIA Brev workspace: {brev_workspace_name}")
+        # print(f"Endpoint: {brev_endpoint}")
+        # print(f"Job ID: {job_id}, User ID: {current_user.id}")
+        # 
+        # workspace_started = False  # Track if we started the workspace
+        # try:
+        #     import time
+        #     import subprocess
+        #     
+        #     # Check workspace status using 'brev list'
+        #     print(f"Checking Brev workspace status...")
+        #     try:
+        #         result = subprocess.run(
+        #             ["brev", "list"],
+        #             capture_output=True,
+        #             text=True,
+        #             timeout=30
+        #         )
+        #         
+        #         if result.returncode != 0:
+        #             raise HTTPException(
+        #                 status_code=500,
+        #                 detail=f"Failed to check Brev workspace status: {result.stderr}"
+        #             )
+        #         
+        #         # Parse the output to check if workspace is running
+        #         workspace_running = False
+        #         for line in result.stdout.split('\n'):
+        #             if brev_workspace_name in line and 'RUNNING' in line:
+        #                 workspace_running = True
+        #                 print(f"Workspace {brev_workspace_name} is already running")
+        #                 break
+        #         
+        #         # Start the workspace if it's not running
+        #         if not workspace_running:
+        #             print(f"Starting Brev workspace {brev_workspace_name}...")
+        #             start_result = subprocess.run(
+        #                 ["brev", "start", brev_workspace_name],
+        #                 capture_output=True,
+        #                 text=True,
+        #                 timeout=60
+        #             )
+        #             
+        #             if start_result.returncode != 0:
+        #                 raise HTTPException(
+        #                     status_code=500,
+        #                     detail=f"Failed to start Brev workspace: {start_result.stderr}"
+        #                 )
+        #             
+        #             workspace_started = True
+        #             print(f"Workspace start command sent: {start_result.stdout}")
+        #             
+        #             # Wait for workspace to be ready (with timeout)
+        #             max_wait_time = 300  # 5 minutes
+        #             wait_interval = 10  # Check every 10 seconds
+        #             elapsed_time = 0
+        #             
+        #             print("Waiting for workspace to be ready...")
+        #             while elapsed_time < max_wait_time:
+        #                 time.sleep(wait_interval)
+        #                 
+        #                 # Check status again
+        #                 status_result = subprocess.run(
+        #                     ["brev", "list"],
+        #                     capture_output=True,
+        #                     text=True,
+        #                     timeout=30
+        #                 )
+        #                 
+        #                 if status_result.returncode == 0:
+        #                     for line in status_result.stdout.split('\n'):
+        #                         if brev_workspace_name in line and 'RUNNING' in line:
+        #                             print(f"Workspace {brev_workspace_name} is now running!")
+        #                             workspace_running = True
+        #                             break
+        #                 
+        #                 if workspace_running:
+        #                     break
+        #                 
+        #                 elapsed_time += wait_interval
+        #                 print(f"Still waiting... ({elapsed_time}s elapsed)")
+        #             
+        #             if not workspace_running:
+        #                 raise HTTPException(
+        #                     status_code=504,
+        #                     detail=f"Workspace {brev_workspace_name} failed to start within {max_wait_time} seconds"
+        #                 )
+        #             
+        #             # Additional wait for services to be fully ready
+        #             print("Waiting for services to be ready...")
+        #             time.sleep(30)
+        #         
+        #     except subprocess.TimeoutExpired:
+        #         raise HTTPException(
+        #             status_code=504,
+        #             detail="Brev CLI command timed out"
+        #         )
+        #     
+        #     # Prepare payload for the Brev environment
+        #     # The server_gpu.py expects a CosmosRequest with dataset_name
+        #     cosmos_payload = {
+        #         "dataset_name": request.dataset_name
+        #     }
+        #     
+        #     print(f"Sending augmentation request to Brev environment...")
+        #     start_time = time.time()
+        #     
+        #     # Send request to Brev endpoint
+        #     # The endpoint should be the full URL including the path, e.g.:
+        #     # https://your-brev-env.brev.dev/run-json-from-prompts
+        #     response = requests.post(
+        #         brev_endpoint,
+        #         json=cosmos_payload,
+        #         timeout=3600,  # 1 hour timeout for video generation
+        #     )
+        #     
+        #     end_time = time.time()
+        #     total_duration = end_time - start_time
+        #     
+        #     if response.status_code != 200:
+        #         error_detail = response.text
+        #         print(f"Brev execution error: {response.status_code} - {error_detail}")
+        #         raise HTTPException(
+        #             status_code=500,
+        #             detail=f"Brev execution failed: {error_detail}"
+        #         )
+        #     
+        #     result_body = response.json()
+        #     print(f"Brev execution response: {result_body}")
+        #     
+        #     # Check if Brev returned an error
+        #     if result_body.get("status") == "error":
+        #         raise HTTPException(
+        #             status_code=500,
+        #             detail=f"Brev execution error: {result_body.get('message', 'Unknown error')}"
+        #         )
+        #     
+        #     return {
+        #         "success": True,
+        #         "dataset_name": request.dataset_name,
+        #         "job_id": job_id,
+        #         "descriptions_count": len(descriptions),
+        #         "variations_count": len(variations),
+        #         "saved_files": saved_files,
+        #         "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/prompts/{prompt_folder_name}/",
+        #         "brev_result": result_body,
+        #         "s3_url": result_body.get("s3_url"),
+        #         "total_duration_seconds": total_duration,
+        #         "message": f"Generated {len(variations)} prompt variations and videos via NVIDIA Brev"
+        #     }
+        # except requests.exceptions.Timeout:
+        #     raise HTTPException(
+        #         status_code=504,
+        #         detail="Brev request timed out. Video generation may still be in progress."
+        #     )
+        # except requests.exceptions.RequestException as e:
+        #     print(f"Error calling Brev endpoint: {e}")
+        #     raise HTTPException(
+        #         status_code=500,
+        #         detail=f"Failed to connect to Brev endpoint: {str(e)}"
+        #     )
+        # finally:
+        #     # Always stop the workspace after execution (success or failure)
+        #     if workspace_started:
+        #         try:
+        #             print(f"Stopping Brev workspace {brev_workspace_name}...")
+        #             stop_result = subprocess.run(
+        #                 ["brev", "stop", brev_workspace_name],
+        #                 capture_output=True,
+        #                 text=True,
+        #                 timeout=60
+        #             )
+        #             
+        #             if stop_result.returncode == 0:
+        #                 print(f"Workspace {brev_workspace_name} stopped successfully: {stop_result.stdout}")
+        #             else:
+        #                 print(f"Warning: Failed to stop workspace {brev_workspace_name}: {stop_result.stderr}")
+        #         except Exception as stop_error:
+        #             print(f"Warning: Exception while stopping workspace {brev_workspace_name}: {stop_error}")
+        #             # Don't raise here, just log the warning
+        # --- END BREV IMPLEMENTATION (COMMENTED OUT) ---
     except HTTPException:
         raise
     except Exception as e:
