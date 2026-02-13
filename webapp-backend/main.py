@@ -2546,23 +2546,10 @@ async def run_augmentation(
         try:
             import time
             
-            # Use RunPod REST API to check pod status
-            print(f"Checking RunPod pod {runpod_pod_id} status...")
-            pod_status_url = f"https://api.runpod.io/v2/{runpod_pod_id}/status"
-            headers = {"Authorization": f"Bearer {runpod_api_key}"}
-            
-            # Check current pod status
-            status_response = requests.get(pod_status_url, headers=headers)
-            if status_response.status_code != 200:
-                print(f"Warning: Could not check pod status: {status_response.text}")
-                # Continue anyway, pod might be running
-            else:
-                pod_info = status_response.json()
-                print(f"Pod status: {pod_info}")
-            
-            # Start the pod using REST API
+            # Use RunPod REST API to start the pod
             print(f"Starting pod {runpod_pod_id}...")
-            start_url = f"https://api.runpod.io/v2/{runpod_pod_id}/start"
+            start_url = f"https://rest.runpod.io/v1/pods/{runpod_pod_id}/start"
+            headers = {"Authorization": f"Bearer {runpod_api_key}"}
             start_response = requests.post(start_url, headers=headers)
             
             if start_response.status_code == 200:
@@ -2649,7 +2636,7 @@ async def run_augmentation(
             if pod_started:
                 try:
                     print(f"Stopping pod {runpod_pod_id}...")
-                    stop_url = f"https://api.runpod.io/v2/{runpod_pod_id}/stop"
+                    stop_url = f"https://rest.runpod.io/v1/pods/{runpod_pod_id}/stop"
                     headers = {"Authorization": f"Bearer {runpod_api_key}"}
                     stop_response = requests.post(stop_url, headers=headers)
                     
