@@ -2571,9 +2571,10 @@ async def run_augmentation(
             print(f"Pod endpoint: {pod_endpoint}")
             
             # Prepare payload for the pod
-            # The server_gpu.py expects a CosmosRequest with dataset_name
+            # The server_gpu.py expects a CosmosRequest with dataset_name and job_id
             cosmos_payload = {
-                "dataset_name": request.dataset_name
+                "dataset_name": request.dataset_name,
+                "job_id": job_id
             }
             
             print(f"Sending augmentation request to pod...")
