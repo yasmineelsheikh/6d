@@ -2544,58 +2544,37 @@ async def run_augmentation(
 
         pod_started = False  # Track if we started the pod
         try:
-            import runpod
             import time
             
-            # Configure RunPod API key
-            runpod.api_key = runpod_api_key
+            # Use RunPod REST API to check pod status
+            print(f"Checking RunPod pod {runpod_pod_id} status...")
+            pod_status_url = f"https://api.runpod.io/v2/{runpod_pod_id}/status"
+            headers = {"Authorization": f"Bearer {runpod_api_key}"}
             
-            # Get pod instance
-            print(f"Connecting to RunPod pod {runpod_pod_id}...")
-            pod = runpod.get_pod(runpod_pod_id)
+            # Check current pod status
+            status_response = requests.get(pod_status_url, headers=headers)
+            if status_response.status_code != 200:
+                print(f"Warning: Could not check pod status: {status_response.text}")
+                # Continue anyway, pod might be running
+            else:
+                pod_info = status_response.json()
+                print(f"Pod status: {pod_info}")
             
-            if not pod:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"RunPod pod {runpod_pod_id} not found"
-                )
+            # Start the pod using REST API
+            print(f"Starting pod {runpod_pod_id}...")
+            start_url = f"https://api.runpod.io/v2/{runpod_pod_id}/start"
+            start_response = requests.post(start_url, headers=headers)
             
-            print(f"Pod status: {pod.get('desiredStatus', 'unknown')}")
-            
-            # Start the pod if it's not running
-            if pod.get('desiredStatus') != 'RUNNING':
-                print(f"Starting pod {runpod_pod_id}...")
-                runpod.resume_pod(runpod_pod_id, gpu_count=1)
+            if start_response.status_code == 200:
                 pod_started = True
-                
-                # Wait for pod to be ready (with timeout)
-                max_wait_time = 300  # 5 minutes
-                wait_interval = 10  # Check every 10 seconds
-                elapsed_time = 0
-                
-                # while elapsed_time < max_wait_time:
-                #     pod = runpod.get_pod(runpod_pod_id)
-                #     pod_status = pod.get('desiredStatus', 'unknown')
-                #     runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
-                    
-                #     print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
-                    
-                #     if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
-                #         print("Pod is running!")
-                #         break
-                    
-                #     time.sleep(wait_interval)
-                #     elapsed_time += wait_interval
-                
-                # if elapsed_time >= max_wait_time:
-                #     raise HTTPException(
-                #         status_code=504,
-                #         detail=f"Pod {runpod_pod_id} failed to start within {max_wait_time} seconds"
-                #     )
-                
-                # Additional wait for services to be fully ready
-                print("Waiting for services to be ready...")
-                time.sleep(30)
+                print(f"Pod start command sent successfully: {start_response.text}")
+            else:
+                print(f"Warning: Pod start returned status {start_response.status_code}: {start_response.text}")
+                # Continue anyway, pod might already be running
+            
+            # Wait for services to be fully ready
+            print("Waiting for services to be ready...")
+            time.sleep(30)
             
             # Get pod endpoint URL
             # RunPod pods expose ports via proxy URLs
@@ -2670,8 +2649,14 @@ async def run_augmentation(
             if pod_started:
                 try:
                     print(f"Stopping pod {runpod_pod_id}...")
-                    runpod.stop_pod(runpod_pod_id)
-                    print(f"Pod {runpod_pod_id} stopped successfully")
+                    stop_url = f"https://api.runpod.io/v2/{runpod_pod_id}/stop"
+                    headers = {"Authorization": f"Bearer {runpod_api_key}"}
+                    stop_response = requests.post(stop_url, headers=headers)
+                    
+                    if stop_response.status_code == 200:
+                        print(f"Pod {runpod_pod_id} stopped successfully: {stop_response.text}")
+                    else:
+                        print(f"Warning: Pod stop returned status {stop_response.status_code}: {stop_response.text}")
                 except Exception as stop_error:
                     print(f"Warning: Failed to stop pod {runpod_pod_id}: {stop_error}")
                     # Don't raise here, just log the warning
