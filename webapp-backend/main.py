@@ -2573,25 +2573,25 @@ async def run_augmentation(
                 wait_interval = 10  # Check every 10 seconds
                 elapsed_time = 0
                 
-                while elapsed_time < max_wait_time:
-                    pod = runpod.get_pod(runpod_pod_id)
-                    pod_status = pod.get('desiredStatus', 'unknown')
-                    runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
+                # while elapsed_time < max_wait_time:
+                #     pod = runpod.get_pod(runpod_pod_id)
+                #     pod_status = pod.get('desiredStatus', 'unknown')
+                #     runtime_status = pod.get('runtime', {}).get('uptimeInSeconds')
                     
-                    print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
+                #     print(f"Pod status: {pod_status}, Uptime: {runtime_status}s")
                     
-                    if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
-                        print("Pod is running!")
-                        break
+                #     if pod_status == 'RUNNING' and runtime_status and runtime_status > 0:
+                #         print("Pod is running!")
+                #         break
                     
-                    time.sleep(wait_interval)
-                    elapsed_time += wait_interval
+                #     time.sleep(wait_interval)
+                #     elapsed_time += wait_interval
                 
-                if elapsed_time >= max_wait_time:
-                    raise HTTPException(
-                        status_code=504,
-                        detail=f"Pod {runpod_pod_id} failed to start within {max_wait_time} seconds"
-                    )
+                # if elapsed_time >= max_wait_time:
+                #     raise HTTPException(
+                #         status_code=504,
+                #         detail=f"Pod {runpod_pod_id} failed to start within {max_wait_time} seconds"
+                #     )
                 
                 # Additional wait for services to be fully ready
                 print("Waiting for services to be ready...")
