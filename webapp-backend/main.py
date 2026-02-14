@@ -2580,33 +2580,69 @@ async def run_augmentation(
             print(f"Sending augmentation request to pod...")
             start_time = time.time()
             
-            # Send request to pod endpoint
-            response = requests.post(
+            # Send request to start job
+            start_job_response = requests.post(
                 pod_endpoint,
                 json=cosmos_payload,
-                timeout=3600,  # 1 hour timeout for video generation
+                timeout=60,  # Short timeout for starting the job
             )
             
-            end_time = time.time()
-            total_duration = end_time - start_time
-            
-            if response.status_code != 200:
-                error_detail = response.text
-                print(f"Pod execution error: {response.status_code} - {error_detail}")
+            if start_job_response.status_code != 200:
+                error_detail = start_job_response.text
+                print(f"Pod job start error: {start_job_response.status_code} - {error_detail}")
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Pod execution failed: {error_detail}"
+                    detail=f"Pod job start failed: {error_detail}"
                 )
             
-            result_body = response.json()
-            print(f"Pod execution response: {result_body}")
+            job_data = start_job_response.json()
+            runpod_job_id = job_data.get("job_id")  # Use distinct name from local job_id if needed, but they should match
+            print(f"Job started on pod with ID: {runpod_job_id}")
             
-            # Check if pod returned an error
-            if result_body.get("status") == "error":
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Pod execution error: {result_body.get('message', 'Unknown error')}"
-                )
+            # Poll for completion
+            status_endpoint = f"https://{runpod_pod_id}-8000.proxy.runpod.net/status/{runpod_job_id}"
+            
+            printed_log_count = 0
+            result_body = None
+            
+            while True:
+                # Check for global timeout (1 hour)
+                if time.time() - start_time > 3600:
+                    raise HTTPException(status_code=504, detail="RunPod job timed out after 1 hour")
+                
+                try:
+                    status_response = requests.get(status_endpoint, timeout=30)
+                    if status_response.status_code == 200:
+                        status_data = status_response.json()
+                        job_status = status_data.get("status")
+                        logs = status_data.get("logs", [])
+                        
+                        # Print new logs
+                        if len(logs) > printed_log_count:
+                            for log_msg in logs[printed_log_count:]:
+                                print(f"[Pod Log] {log_msg}")
+                            printed_log_count = len(logs)
+                        
+                        if job_status == "completed":
+                            result_body = status_data.get("result")
+                            print("Job completed successfully!")
+                            break
+                        elif job_status == "failed":
+                            error_msg = status_data.get("error", "Unknown error")
+                            raise HTTPException(status_code=500, detail=f"Pod job failed: {error_msg}")
+                        
+                        # Wait before next poll
+                        time.sleep(10)
+                    else:
+                        print(f"Warning: Status check returned {status_response.status_code}")
+                        time.sleep(10)
+                        
+                except requests.RequestException as e:
+                    print(f"Warning: Error polling status: {e}")
+                    time.sleep(10)
+                        
+            # Use the result from the completed job
+            # result_body is already set above
             
             return {
                 "success": True,
