@@ -42,15 +42,15 @@ export default function Home() {
   const [curatedData, setCuratedData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  
+
   // Distributions state
   const [aresDistributions, setAresDistributions] = useState<Visualization[]>([])
-  
+
   // Authentication
   const { user, isAuthenticated, loading: authLoading, logout } = useAuth()
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false)
-  
+
   // Upload form state
   const router = useRouter()
   const [datasetPath, setDatasetPath] = useState('')
@@ -59,14 +59,14 @@ export default function Home() {
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [uploadMode, setUploadMode] = useState<'local' | 's3' | 'huggingface'>('local')
   const [uploadedFiles, setUploadedFiles] = useState<FileList | null>(null)
-  
+
   // S3 credentials state
   const [s3AccessKey, setS3AccessKey] = useState('')
   const [s3SecretKey, setS3SecretKey] = useState('')
   const [s3Bucket, setS3Bucket] = useState('')
   const [s3Region, setS3Region] = useState('')
   const [s3UserPath, setS3UserPath] = useState('')
-  
+
   // Hugging Face state
   const [hfRepoId, setHfRepoId] = useState('')
   const [hfSplit, setHfSplit] = useState('train')
@@ -74,14 +74,14 @@ export default function Home() {
   const [ingestionStatus, setIngestionStatus] = useState<'in_progress' | 'complete' | 'failed' | null>(null)
   const [ingestingDatasetName, setIngestingDatasetName] = useState<string | null>(null)
   const [ingestionProgress, setIngestionProgress] = useState(0)
-  
+
   // Plot configuration state
   const [environment, setEnvironment] = useState<'Indoor' | 'Outdoor' | ''>('')
   const [selectedAxes, setSelectedAxes] = useState<string[]>([])
   const [showAdvancedAxes, setShowAdvancedAxes] = useState(false)
   const [isIndoor, setIsIndoor] = useState(false)
   const [isOutdoor, setIsOutdoor] = useState(false)
-  
+
   // Initialize all axes as checked by default when environment changes
   useEffect(() => {
     if (environment === 'Indoor') {
@@ -92,7 +92,7 @@ export default function Home() {
       setSelectedAxes([])
     }
   }, [environment])
-  
+
   // Update environment based on checkbox states
   useEffect(() => {
     if (isIndoor && !isOutdoor) {
@@ -103,7 +103,7 @@ export default function Home() {
       setEnvironment('')
     }
   }, [isIndoor, isOutdoor])
-  
+
   // Side menu and modals state
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
@@ -111,16 +111,55 @@ export default function Home() {
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false)
   const [tasks, setTasks] = useState<TaskData[]>([])
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'Preparation' | 'Evaluation'>('Preparation')
+  const [showEvaluationInsights, setShowEvaluationInsights] = useState(false)
+
   // Debug: verify API base URL at runtime
   useEffect(() => {
     console.log('API_BASE at runtime:', API_BASE)
   }, [])
-  
+
+  const handleEvaluationUpload = async () => {
+    if (uploadMode === 'local' && !uploadedFiles) return
+    if (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) return
+    if (uploadMode === 'huggingface' && !hfRepoId) return
+
+    // Auto-generate dataset name if not set
+    let finalDatasetName = datasetName
+    if (!finalDatasetName) {
+      if (uploadMode === 'local' && uploadedFiles) {
+        const firstFile = uploadedFiles[0]
+        const relativePath = (firstFile as any).webkitRelativePath || firstFile.name
+        finalDatasetName = relativePath.split('/')[0]
+      } else if (uploadMode === 's3' && s3UserPath) {
+        const pathParts = s3UserPath.split('/').filter(p => p)
+        finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+      } else if (uploadMode === 'huggingface' && hfRepoId) {
+        finalDatasetName = hfRepoId.split('/').pop() || 'dataset'
+      } else {
+        return // Cannot proceed without a dataset name
+      }
+      setDatasetName(finalDatasetName)
+    }
+
+    setUploadLoading(true)
+    setUploadSuccess(false)
+    setError(null)
+
+    // Simulate upload for placeholder
+    setTimeout(() => {
+      setUploadLoading(false)
+      setUploadSuccess(true)
+      setShowEvaluationInsights(true)
+    }, 1500)
+  }
+
   const handleLoadDataset = async () => {
     if (uploadMode === 'local' && !uploadedFiles) return
     if (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) return
     if (uploadMode === 'huggingface' && !hfRepoId) return
-    
+
     // Auto-generate dataset name if not set
     let finalDatasetName = datasetName
     if (!finalDatasetName) {
@@ -229,19 +268,19 @@ export default function Home() {
       setIngestingDatasetName(finalDatasetName)
       setIngestionStatus('in_progress')
       setIngestionProgress(10) // Start at 10%
-      
+
       // Poll for ingestion completion
       const pollIngestionStatus = async () => {
         const maxAttempts = 300 // 5 minutes max (300 * 1 second)
         let attempts = 0
-        
+
         const checkStatus = async (): Promise<void> => {
           try {
             const statusResponse = await fetch(`${API_BASE}/api/datasets/${encodeURIComponent(finalDatasetName)}/ingestion-status`)
             if (statusResponse.ok) {
               const statusData = await statusResponse.json()
               const status = statusData.status
-              
+
               if (status === 'complete') {
                 setIngestionProgress(100)
                 setIngestionStatus('complete')
@@ -308,11 +347,11 @@ export default function Home() {
             }
           }
         }
-        
+
         // Start polling after a short delay
         setTimeout(checkStatus, 1000)
       }
-      
+
       pollIngestionStatus()
     } catch (error: any) {
       setError(error.message)
@@ -340,13 +379,13 @@ export default function Home() {
     setCurrentDataset(datasetName)
     setLoading(true)
     setError(null)
-    
+
     try {
       const response = await fetch(`${API_BASE}/api/datasets/${datasetName}/info`)
       if (!response.ok) throw new Error('Failed to load dataset info')
       const info = await response.json()
       setDatasetInfo(info)
-      
+
       const dataResponse = await fetch(`${API_BASE}/api/datasets/${datasetName}/data`)
       if (!dataResponse.ok) throw new Error('Failed to load dataset data')
       const data = await dataResponse.json()
@@ -387,7 +426,7 @@ export default function Home() {
 
     const loadDistributions = async () => {
       if (!isMounted) return
-      
+
       try {
         // Build query parameters
         const params = new URLSearchParams()
@@ -399,12 +438,12 @@ export default function Home() {
         }
         // Always send axes parameter, even if empty, so backend knows user's selection
         params.append('axes', JSON.stringify(selectedAxes))
-        
+
         const url = `${API_BASE}/api/ares/distributions${params.toString() ? '?' + params.toString() : ''}`
         const distResponse = await fetch(url)
         if (distResponse.ok) {
           const distData = await distResponse.json()
-          
+
           // If ingestion is in progress, poll until it completes
           if (distData.ingestion_status === 'in_progress') {
             console.log('Ingestion in progress, polling for completion...')
@@ -427,13 +466,13 @@ export default function Home() {
             }
             return
           }
-          
+
           // Clear polling if ingestion completed
           if (pollInterval) {
             clearInterval(pollInterval)
             pollInterval = null
           }
-          
+
           // Set distributions
           const vizs = distData.visualizations || []
           if (isMounted) {
@@ -466,7 +505,7 @@ export default function Home() {
     }
 
     loadDistributions()
-    
+
     // Cleanup polling on unmount or dependency change
     return () => {
       isMounted = false
@@ -498,7 +537,7 @@ export default function Home() {
     const updatedTasks = [...tasks, newTask]
     setTasks(updatedTasks)
     localStorage.setItem('app_tasks', JSON.stringify(updatedTasks))
-    
+
     // Optionally send to backend
     try {
       await fetch(`${API_BASE}/api/tasks`, {
@@ -537,7 +576,7 @@ export default function Home() {
         const errorText = await response.text()
         throw new Error(errorText || 'Failed to export dataset')
       }
-      
+
       // Get the zip file as a blob
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
@@ -660,9 +699,33 @@ export default function Home() {
               <Menu className="w-4 h-4" />
             </button>
             <div className="flex items-center gap-4 px-6 flex-1">
-              <h1 className="text-sm font-medium tracking-wide text-white">
+              <h1 className="text-sm font-medium tracking-wide text-white mr-8">
                 6d labs
               </h1>
+              <div className="flex items-center gap-6 h-full">
+                <button
+                  onClick={() => setActiveTab('Preparation')}
+                  className={cn(
+                    "h-full text-xs font-medium border-b-2 transition-colors px-1",
+                    activeTab === 'Preparation'
+                      ? "border-[#4b6671] text-white"
+                      : "border-transparent text-[#9aa4b5] hover:text-[#d4d4d4]"
+                  )}
+                >
+                  Preparation
+                </button>
+                <button
+                  onClick={() => setActiveTab('Evaluation')}
+                  className={cn(
+                    "h-full text-xs font-medium border-b-2 transition-colors px-1",
+                    activeTab === 'Evaluation'
+                      ? "border-[#4b6671] text-white"
+                      : "border-transparent text-[#9aa4b5] hover:text-[#d4d4d4]"
+                  )}
+                >
+                  Evaluation
+                </button>
+              </div>
               {currentDataset && (
                 <>
                   <div className="h-3 w-px bg-[#2a2a2a]" />
@@ -681,7 +744,7 @@ export default function Home() {
         <div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center">
           <div className="w-full max-w-md px-8">
             <div className="h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden">
-              <div 
+              <div
                 className="h-full bg-[#9aa4b5] rounded-full transition-all duration-500 ease-out"
                 style={{
                   width: `${ingestionProgress}%`
@@ -691,9 +754,10 @@ export default function Home() {
           </div>
         </div>
       ) : (
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Upload Data Section */}
-        <div className="mb-8">
+        <main className="max-w-7xl mx-auto px-6 py-8">
+          {activeTab === 'Preparation' && (
+            {/* Upload Data Section */ }
+            < div className="mb-8">
           <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Upload Data</h2>
           <div className="bg-[#222222] border border-[#2a2a2a] p-6">
             <div className="flex items-start gap-4 mb-4">
@@ -708,11 +772,10 @@ export default function Home() {
                       setUploadedFiles(null)
                       setDatasetPath('')
                     }}
-                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
-                      uploadMode === 'local'
+                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'local'
                         ? 'bg-[#4b6671] text-white'
                         : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                    }`}
+                      }`}
                   >
                     <Folder className="w-3 h-3" />
                     Local
@@ -724,11 +787,10 @@ export default function Home() {
                       setUploadedFiles(null)
                       setDatasetPath('')
                     }}
-                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
-                      uploadMode === 's3'
+                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 's3'
                         ? 'bg-[#4b6671] text-white'
                         : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                    }`}
+                      }`}
                   >
                     <Cloud className="w-3 h-3" />
                     S3
@@ -740,11 +802,10 @@ export default function Home() {
                       setUploadedFiles(null)
                       setDatasetPath('')
                     }}
-                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${
-                      uploadMode === 'huggingface'
+                    className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'huggingface'
                         ? 'bg-[#4b6671] text-white'
                         : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                    }`}
+                      }`}
                   >
                     <Cloud className="w-3 h-3" />
                     HF
@@ -880,7 +941,7 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              
+
               {/* Settings on far right in fixed-width column */}
               <div className="flex items-center gap-3 flex-shrink-0 w-72 justify-end relative">
                 {/* Environment Selection - Checkboxes */}
@@ -962,14 +1023,14 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            
+
             {/* Load Dataset Button - 25% width, centered with larger top gap for axes */}
             <div className="flex justify-center mt-10">
               <button
                 onClick={handleLoadDataset}
                 disabled={
-                  uploadLoading || 
-                  (uploadMode === 'local' && !uploadedFiles) || 
+                  uploadLoading ||
+                  (uploadMode === 'local' && !uploadedFiles) ||
                   (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) ||
                   (uploadMode === 'huggingface' && !hfRepoId)
                 }
@@ -998,118 +1059,392 @@ export default function Home() {
         </div>
 
         {error && (
-          <div className="mb-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] flex items-center gap-2">
-            <XCircle className="w-3.5 h-3.5 text-[#cc6666]" />
-            <span className="text-xs text-[#cc6666]">{error}</span>
-          </div>
-        )}
-
-        {loading && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-[#9aa4b5]" />
-          </div>
-        )}
-
-        {/* Data Analysis Section */}
-        {currentDataset && !loading && (
-          <div className="mb-8">
-            <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Data Analysis</h2>
-            <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-8">
-              <DatasetOverview datasetInfo={datasetInfo} />
-              <DatasetDistributions 
-                datasetName={currentDataset} 
-                aresDistributions={aresDistributions}
-              />
-              <EpisodePreview datasetData={datasetData} />
-            </div>
-          </div>
-        )}
-
-        {/* Dataset Curation Section */}
-        {currentDataset && !loading && (
-          <div className="mb-8">
-            <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Curation</h2>
-            <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-6">
-              {/* Augmentation Card */}
-              <div>
-                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Augmentation</h3>
-                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
-                  <AugmentationPanel
-                    datasetName={currentDataset}
-                    onComplete={handleAugmentationComplete}
-                  />
-                </div>
-              </div>
-
-              {/* Optimization Card - Coming Soon */}
-              <div>
-                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Optimization</h3>
-                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
-                  <OptimizationPanel
-                    datasetName={currentDataset}
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                    <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Update with Test Data Card - Coming Soon */}
-              <div>
-                <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Update with test data</h3>
-                <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
-                  <TestingPanel datasetName={currentDataset} />
-                  <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                    <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!currentDataset && !loading && (
-          <div className="text-center py-16">
-            <p className="text-[#b5becb] text-xs">
-              Load a dataset to get started
-            </p>
-          </div>
-        )}
-
-        {/* Export Section */}
-        {currentDataset && !loading && (
-          <div className="mt-4 flex justify-end">
-            <button
-              onClick={handleExportDataset}
-              className="px-4 py-2 text-xs bg-[#4b6671] text-white hover:bg-[#3d5560] transition-colors border border-[#2a2a2a]"
-            >
-              Export Dataset
-            </button>
-          </div>
-        )}
-      </main>
+        <div className="mb-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] flex items-center gap-2">
+          <XCircle className="w-3.5 h-3.5 text-[#cc6666]" />
+          <span className="text-xs text-[#cc6666]">{error}</span>
+        </div>
       )}
 
-      {/* Login Modal */}
-      <LoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        onSwitchToRegister={() => {
-          setIsLoginModalOpen(false)
-          setIsRegisterModalOpen(true)
-        }}
-      />
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-5 h-5 animate-spin text-[#9aa4b5]" />
+        </div>
+      )}
 
-      {/* Register Modal */}
-      <RegisterModal
-        isOpen={isRegisterModalOpen}
-        onClose={() => setIsRegisterModalOpen(false)}
-        onSwitchToLogin={() => {
-          setIsRegisterModalOpen(false)
-          setIsLoginModalOpen(true)
-        }}
-      />
-    </div>
+      {/* Data Analysis Section */}
+      {currentDataset && !loading && (
+        <div className="mb-8">
+          <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Data Analysis</h2>
+          <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-8">
+            <DatasetOverview datasetInfo={datasetInfo} />
+            <DatasetDistributions
+              datasetName={currentDataset}
+              aresDistributions={aresDistributions}
+            />
+            <EpisodePreview datasetData={datasetData} />
+          </div>
+        </div>
+      )}
+
+      {/* Dataset Curation Section */}
+      {currentDataset && !loading && (
+        <div className="mb-8">
+          <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Curation</h2>
+          <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-6">
+            {/* Augmentation Card */}
+            <div>
+              <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Augmentation</h3>
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
+                <AugmentationPanel
+                  datasetName={currentDataset}
+                  onComplete={handleAugmentationComplete}
+                />
+              </div>
+            </div>
+
+            {/* Optimization Card - Coming Soon */}
+            <div>
+              <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Optimization</h3>
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
+                <OptimizationPanel
+                  datasetName={currentDataset}
+                />
+                <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                  <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Update with Test Data Card - Coming Soon */}
+            <div>
+              <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Update with test data</h3>
+              <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
+                <TestingPanel datasetName={currentDataset} />
+                <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
+                  <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!currentDataset && !loading && (
+        <div className="text-center py-16">
+          <p className="text-[#b5becb] text-xs">
+            Load a dataset to get started
+          </p>
+        </div>
+      )}
+
+      {/* Export Section */}
+      {currentDataset && !loading && (
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={handleExportDataset}
+            className="px-4 py-2 text-xs bg-[#4b6671] text-white hover:bg-[#3d5560] transition-colors border border-[#2a2a2a]"
+          >
+            Export Dataset
+          </button>
+        </div>
+      )}
+        )}
+
+      {/* Evaluation Tab Content */}
+      {activeTab === 'Evaluation' && (
+        <div className="mb-8">
+          {!showEvaluationInsights ? (
+            <div className="mb-8">
+              <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Upload Evaluation Data</h2>
+              <div className="bg-[#222222] border border-[#2a2a2a] p-6">
+                <div className="flex items-start gap-4 mb-4">
+                  {/* Input boxes */}
+                  <div className="flex-1 flex items-center gap-4">
+                    {/* Upload Mode Toggle */}
+                    <div className="flex items-center gap-2 border border-[#2a2a2a] rounded p-1 bg-[#1a1a1a]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUploadMode('local')
+                          setUploadedFiles(null)
+                          setDatasetPath('')
+                        }}
+                        className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'local'
+                            ? 'bg-[#4b6671] text-white'
+                            : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
+                          }`}
+                      >
+                        <Folder className="w-3 h-3" />
+                        Local
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUploadMode('s3')
+                          setUploadedFiles(null)
+                          setDatasetPath('')
+                        }}
+                        className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 's3'
+                            ? 'bg-[#4b6671] text-white'
+                            : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
+                          }`}
+                      >
+                        <Cloud className="w-3 h-3" />
+                        S3
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUploadMode('huggingface')
+                          setUploadedFiles(null)
+                          setDatasetPath('')
+                        }}
+                        className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'huggingface'
+                            ? 'bg-[#4b6671] text-white'
+                            : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
+                          }`}
+                      >
+                        <Cloud className="w-3 h-3" />
+                        HF
+                      </button>
+                    </div>
+
+                    {/* Local Upload */}
+                    {uploadMode === 'local' && (
+                      <div className="relative w-[576px]">
+                        <input
+                          type="file"
+                          id="folder-upload-eval"
+                          {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+                          multiple
+                          onChange={handleFolderSelect}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor="folder-upload-eval"
+                          className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors cursor-pointer flex items-center gap-2 hover:bg-[#252525]"
+                        >
+                          <Folder className="w-4 h-4 flex-shrink-0" />
+                          <span className="flex-1 truncate">
+                            {datasetPath || 'Select folder...'}
+                          </span>
+                          {uploadedFiles && (
+                            <span className="text-[#9aa4b5] text-[10px]">
+                              ({uploadedFiles.length} files)
+                            </span>
+                          )}
+                        </label>
+                      </div>
+                    )}
+
+                    {/* S3 Credentials */}
+                    {uploadMode === 's3' && (
+                      <div className="flex flex-col gap-2 w-[576px]">
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Access Key"
+                            value={s3AccessKey}
+                            onChange={(e) => setS3AccessKey(e.target.value)}
+                            autoComplete="off"
+                            data-form-type="other"
+                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                          />
+                          <input
+                            type="password"
+                            placeholder="Secret Key"
+                            value={s3SecretKey}
+                            onChange={(e) => setS3SecretKey(e.target.value)}
+                            autoComplete="new-password"
+                            data-form-type="other"
+                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Bucket Name"
+                            value={s3Bucket}
+                            onChange={(e) => setS3Bucket(e.target.value)}
+                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Region (e.g., us-east-1)"
+                            value={s3Region}
+                            onChange={(e) => setS3Region(e.target.value)}
+                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                          />
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Path within bucket (e.g., datasets/my-dataset/)"
+                          value={s3UserPath}
+                          onChange={(e) => {
+                            const path = e.target.value
+                            setS3UserPath(path)
+                            setDatasetPath(path)
+                            if (path) {
+                              const pathParts = path.split('/').filter(p => p)
+                              const datasetNameFromPath = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+                              setDatasetName(datasetNameFromPath)
+                            } else {
+                              setDatasetName('')
+                            }
+                          }}
+                          className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                        />
+                      </div>
+                    )}
+
+                    {/* Hugging Face Input */}
+                    {uploadMode === 'huggingface' && (
+                      <div className="flex flex-col gap-2 w-[576px]">
+                        <input
+                          type="text"
+                          placeholder="Repository ID (e.g., username/dataset-name)"
+                          value={hfRepoId}
+                          onChange={(e) => {
+                            const repoId = e.target.value
+                            setHfRepoId(repoId)
+                            setDatasetPath(repoId)
+                            if (repoId) {
+                              const datasetNameFromRepo = repoId.split('/').pop() || 'dataset'
+                              setDatasetName(datasetNameFromRepo)
+                            } else {
+                              setDatasetName('')
+                            }
+                          }}
+                          className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Split (default: train)"
+                            value={hfSplit}
+                            onChange={(e) => setHfSplit(e.target.value)}
+                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                          />
+                          <input
+                            type="password"
+                            placeholder="HF Token (optional, for private datasets)"
+                            value={hfToken}
+                            onChange={(e) => setHfToken(e.target.value)}
+                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Load Dataset Button */}
+                <div className="flex justify-center mt-10">
+                  <button
+                    onClick={handleEvaluationUpload}
+                    disabled={
+                      uploadLoading ||
+                      (uploadMode === 'local' && !uploadedFiles) ||
+                      (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) ||
+                      (uploadMode === 'huggingface' && !hfRepoId)
+                    }
+                    className="w-1/4 px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
+                    style={{ backgroundColor: '#4b6671' }}
+                  >
+                    {uploadLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading...
+                      </>
+                    ) : uploadSuccess ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        Loaded
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        Load Dataset
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="mb-4 mt-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] flex items-center gap-2">
+                  <XCircle className="w-3.5 h-3.5 text-[#cc6666]" />
+                  <span className="text-xs text-[#cc6666]">{error}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xs font-medium text-[#d4d4d4]">Evaluation Insights</h2>
+                <button
+                  onClick={() => {
+                    setShowEvaluationInsights(false)
+                    setUploadSuccess(false)
+                  }}
+                  className="text-xs text-[#4b6671] hover:underline"
+                >
+                  Upload different dataset
+                </button>
+              </div>
+              <div className="bg-[#222222] border border-[#2a2a2a] p-6">
+                {/* Placeholder Content */}
+                <div className="grid grid-cols-2 gap-6 mb-6">
+                  <div className="bg-[#1a1a1a] p-4 border border-[#2a2a2a]">
+                    <h3 className="text-xs font-medium text-[#9aa4b5] mb-2">Success Rate</h3>
+                    <div className="text-2xl font-bold text-[#4b6671]">87.5%</div>
+                    <div className="text-xs text-[#666] mt-1">Based on 120 episodes</div>
+                  </div>
+                  <div className="bg-[#1a1a1a] p-4 border border-[#2a2a2a]">
+                    <h3 className="text-xs font-medium text-[#9aa4b5] mb-2">Failure Modes</h3>
+                    <div className="h-32 flex items-center justify-center text-[#666] text-xs">
+                      <span className="italic">Chart Placeholder: Failure Categories</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-[#1a1a1a] p-4 border border-[#2a2a2a]">
+                  <h3 className="text-xs font-medium text-[#9aa4b5] mb-2">Performance Analysis</h3>
+                  <p className="text-xs text-[#d4d4d4] leading-relaxed">
+                    The robot demonstrated strong performance in unobstructed paths but showed higher failure rates in low-light conditions.
+                    Response latency increased by 15% during complex object interactions.
+                    <br /><br />
+                    <strong>Modelling Accuracy:</strong> The model accurately predicted 92% of dynamic obstacle trajectories, but underestimated friction coefficients on wet surfaces by 12%.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </main>
+  )
+}
+
+{/* Login Modal */ }
+<LoginModal
+  isOpen={isLoginModalOpen}
+  onClose={() => setIsLoginModalOpen(false)}
+  onSwitchToRegister={() => {
+    setIsLoginModalOpen(false)
+    setIsRegisterModalOpen(true)
+  }}
+/>
+
+{/* Register Modal */ }
+<RegisterModal
+  isOpen={isRegisterModalOpen}
+  onClose={() => setIsRegisterModalOpen(false)}
+  onSwitchToLogin={() => {
+    setIsRegisterModalOpen(false)
+    setIsLoginModalOpen(true)
+  }}
+/>
+    </div >
   )
 }
 

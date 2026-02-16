@@ -1,0 +1,348 @@
+#server.py file used by gpu
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+import tempfile
+import os
+import subprocess
+import json
+import boto3
+from pathlib import Path
+from datetime import datetime
+from botocore.exceptions import BotoCoreError, ClientError
+import sys
+import threading
+import time
+import uuid
+
+# Add parent directory to path to import generate_prompt
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+S3_BUCKET = "6d-temp-storage"
+S3_REGION = "us-west-2"
+s3 = boto3.client("s3", region_name=S3_REGION)
+
+app = FastAPI()
+
+# Global job store
+# Structure: {job_id: {"status": "processing"|"completed"|"failed", "logs": [], "result": {}, "error": str, "timestamp": float}}
+jobs: Dict[str, Dict[str, Any]] = {}
+
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "Cosmos API is running"}
+
+
+class CosmosRequest(BaseModel):
+    dataset_name: str
+    job_id: str
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    logs: List[str]
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+def download_folder_from_s3(s3_prefix: str, local_path: str, log_func) -> None:
+    os.makedirs(local_path, exist_ok=True)
+
+    paginator = s3.get_paginator('list_objects_v2')
+    pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=s3_prefix)
+    for page in pages:
+        if 'Contents' not in page:
+            continue
+        for obj in page['Contents']:
+            s3_key = obj['Key']
+
+            if s3_key == s3_prefix or s3_key.endswith('/'):
+                continue
+            relative_path = s3_key[len(s3_prefix):].lstrip('/')
+            local_file_path = os.path.join(local_path, relative_path)
+
+            os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+
+            try:
+                s3.download_file(S3_BUCKET, s3_key, local_file_path)
+                log_func(f"Downloaded s3://{S3_BUCKET}/{s3_key} to {local_file_path}")
+            except (BotoCoreError, ClientError) as e:
+                log_func(f"Error downloading {s3_key}: {e}")
+                raise
+
+def download_spec_template(template_name: str, local_dir: str, log_func) -> str:
+    """Download a specific spec template from S3."""
+    os.makedirs(local_dir, exist_ok=True)
+    local_path = os.path.join(local_dir, template_name)
+    
+    # Check if already exists locally to avoid re-downloading
+    if os.path.exists(local_path):
+        return local_path
+        
+    s3_key = f"spec_templates/{template_name}"
+    try:
+        log_func(f"Downloading spec template from s3://{S3_BUCKET}/{s3_key}")
+        s3.download_file(S3_BUCKET, s3_key, local_path)
+        return local_path
+    except (BotoCoreError, ClientError) as e:
+        log_func(f"Error downloading spec template {template_name}: {e}")
+        # specific fallback logic or re-raise
+        raise
+
+def process_job(job_id: str, dataset_name: str):
+    """Background task to process the Cosmos request."""
+    # Helper to capture logs for this specific job
+    def job_log(message):
+        print(f"[{job_id}] {message}")
+        if job_id in jobs:
+            jobs[job_id]["logs"].append(str(message))
+
+    job_log(f"Starting job {job_id} for dataset {dataset_name}")
+    
+    try:
+        s3_prefix = f"jobs/{job_id}/input"
+
+        # Create temporary directory for downloaded files
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_data_path = os.path.join(temp_dir, "data")
+            
+            # Download dataset folder from S3
+            job_log(f"Downloading dataset from s3://{S3_BUCKET}/{s3_prefix}")
+            download_folder_from_s3(s3_prefix, local_data_path, job_log)
+            
+            # Find the prompts folder
+            prompts_base_path = os.path.join(local_data_path, "prompts")
+            if not os.path.exists(prompts_base_path):
+                raise FileNotFoundError(f"Prompts folder not found at {prompts_base_path}")
+            
+            # Find metadata.json file in the prompts folder
+            metadata_path = None
+            for root, dirs, files in os.walk(prompts_base_path):
+                if "metadata.json" in files:
+                    metadata_path = os.path.join(root, "metadata.json")
+                    break
+            
+            if not metadata_path or not os.path.exists(metadata_path):
+                raise FileNotFoundError(f"metadata.json not found in {prompts_base_path}")
+            
+            # Load metadata
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+            
+            if not metadata:
+                raise ValueError(f"metadata.json is empty or invalid")
+            
+            job_log(f"Found {len(metadata)} prompt variations in metadata")
+            
+            # Process each entry in metadata
+            output_urls = []
+            for i, entry in enumerate(metadata):
+                video_relative_path = entry.get("video_path", "")
+                txt_relative_path = entry.get("txt_file_path", "")
+                axis = entry.get("axis", "Unknown")
+                
+                # Resolve absolute paths from metadata relative paths
+                video_path = os.path.join(local_data_path, video_relative_path)
+                prompt_file_path = os.path.join(local_data_path, txt_relative_path)
+                
+                if not os.path.exists(video_path):
+                    job_log(f"Warning: Video not found at {video_path}, skipping entry {i+1}")
+                    continue
+                
+                if not os.path.exists(prompt_file_path):
+                    job_log(f"Warning: Prompt file not found at {prompt_file_path}, skipping entry {i+1}")
+                    continue
+                
+                job_log(f"Processing variation {i+1}/{len(metadata)}: {prompt_file_path} (axis: {axis}, video: {video_relative_path})")
+                
+                # Map axis names to spec template files
+                axis_to_spec = {
+                    "Lighting": "indoor_lighting_spec.json",
+                    "Objects": "objects_spec.json",
+                    "Color/Material": "color_texture_spec.json",
+                    "Materials": "color_texture_spec.json",  # Alias for Color/Material
+                    "Weather": "weather_spec.json",
+                    "Road Surface": "road_surface_spec.json",
+                    "Outdoor Lighting": "outdoor_lighting_spec.json",
+                }
+                
+                # Get spec template file name for this axis
+                spec_filename = axis_to_spec.get(axis)
+                if not spec_filename:
+                    job_log(f"Warning: Unknown axis '{axis}', using default spec. Available axes:{list(axis_to_spec.keys())}")
+                    spec_filename = "objects_spec.json"  # Default fallback
+                
+                # Load spec template from spec_templates directory
+                spec_templates_dir = os.path.join(temp_dir, "spec_templates")
+                spec_file_path = download_spec_template(spec_filename, spec_templates_dir, job_log)
+                
+                # Verify it exists
+                if not os.path.exists(spec_file_path):
+                    raise FileNotFoundError(f"Spec template not found: {spec_file_path}")
+                
+                # Load the spec template
+                with open(spec_file_path, 'r') as f:
+                    cosmos_input = json.load(f)
+                        
+                # Override with prompt_path and video_path from metadata
+                cosmos_input["name"] = dataset_name
+                cosmos_input["prompt_path"] = f"{prompt_file_path}" 
+                cosmos_input["video_path"] = f"{video_path}"
+                
+                # Fix for invalid control paths in templates
+                if "edge" in cosmos_input and "control_path" in cosmos_input["edge"]:
+                    job_log(f"Overriding edge.control_path with {video_path}")
+                    cosmos_input["edge"]["control_path"] = f"{video_path}"
+                
+                # Check for other common controls and override if needed
+                for control_type in ["depth", "normal", "canny"]:
+                    if control_type in cosmos_input and "control_path" in cosmos_input[control_type]:
+                         job_log(f"Overriding {control_type}.control_path with {video_path}")
+                         cosmos_input[control_type]["control_path"] = f"{video_path}"
+                            
+                # Prepare JSON input for Cosmos
+                cosmos_input_spec = os.path.join(temp_dir, f"input_spec_{i}.json")
+                with open(cosmos_input_spec, "w") as f:
+                    json.dump(cosmos_input, f, indent=2)
+                
+                # Construct command to activate venv and run inference
+                command = f"source .venv/bin/activate && python examples/inference.py -i {cosmos_input_spec} -o outputs/test_{i}"
+                
+                job_log(f"Preparing to run command: {command}")
+                
+                try:
+                    # Run with Popen to stream output in real-time
+                    process = subprocess.Popen(
+                        command, 
+                        shell=True, 
+                        executable="/bin/bash",
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        bufsize=1,
+                        universal_newlines=True
+                    )
+                    
+                    # Read stdout and stderr in real-time
+                    # We use a selector to read from both streams
+                    import select
+                    
+                    while True:
+                        reads = [process.stdout.fileno(), process.stderr.fileno()]
+                        ret = select.select(reads, [], [], 1.0)  # Wait up to 1s
+                        
+                        for fd in ret[0]:
+                            if fd == process.stdout.fileno():
+                                line = process.stdout.readline()
+                                if line:
+                                    job_log(f"[Stdout] {line.strip()}")
+                            if fd == process.stderr.fileno():
+                                line = process.stderr.readline()
+                                if line:
+                                    job_log(f"[Stderr] {line.strip()}")
+                        
+                        if process.poll() is not None:
+                            # Process finished, read remaining output
+                            for line in process.stdout:
+                                job_log(f"[Stdout] {line.strip()}")
+                            for line in process.stderr:
+                                job_log(f"[Stderr] {line.strip()}")
+                            break
+                            
+                    return_code = process.returncode
+                    
+                    if return_code == 0:
+                        job_log(f"Completed processing variation {i+1}/{len(metadata)} (axis: {axis})")
+                    else:
+                        job_log(f"Error processing variation {i+1}. Return code: {return_code}")
+                        continue  # Continue with next variation if this one fails
+                except Exception as e:
+                    job_log(f"Exception running command for variation {i+1}: {e}")
+                    continue
+                
+                # After successful Cosmos run, upload any generated videos in the output folder to S3
+                try:
+                    output_dir = Path(f"outputs/test_{i}")
+                    if not output_dir.exists():
+                        job_log(f"Warning: Output directory not found at {output_dir}, skipping upload for variation {i+1}")
+                        continue
+                    
+                    output_files = list(output_dir.glob("*.mp4"))
+                    if not output_files:
+                        job_log(f"Warning: No .mp4 files found in {output_dir}, skipping upload for variation {i+1}")
+                        continue
+                    
+                    for output_video in output_files:
+                        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                        s3_key = f"outputs/{dataset_name}/{output_video.stem}_{timestamp}.mp4"
+                        try:
+                            s3.upload_file(str(output_video), S3_BUCKET, s3_key)
+                            s3_url = f"s3://{S3_BUCKET}/{s3_key}"
+                            output_urls.append(s3_url)
+                            job_log(f"Uploaded Cosmos output to {s3_url}")
+                        except (BotoCoreError, ClientError) as upload_err:
+                            job_log(f"Error uploading output to S3: {upload_err}")
+                except Exception as upload_wrapper_err:
+                    job_log(f"Unexpected error while handling Cosmos outputs for variation {i+1}: {upload_wrapper_err}")
+                    continue
+            
+            # Job completion logic
+            if not output_urls:
+                jobs[job_id]["status"] = "completed"
+                jobs[job_id]["result"] = {
+                    "success": True, 
+                    "processed_variations": len(metadata), 
+                    "message": "All variations processed (no outputs generated)",
+                }
+            else:
+                jobs[job_id]["status"] = "completed"
+                jobs[job_id]["result"] = {
+                    "success": True,
+                    "s3_url": output_urls[0] if len(output_urls) == 1 else output_urls,
+                }
+            
+            job_log("Job completed successfully")
+           
+    except Exception as e:
+        job_log(f"Critical error in job {job_id}: {str(e)}")
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+
+
+@app.post("/run-json-from-prompts")
+def run_cosmos_from_prompts(req: CosmosRequest, background_tasks: BackgroundTasks):
+    job_id = req.job_id
+    if not job_id:
+        job_id = str(uuid.uuid4())
+    
+    # Initialize job in global store
+    jobs[job_id] = {
+        "status": "processing",
+        "logs": [],
+        "result": None,
+        "error": None,
+        "timestamp": time.time()
+    }
+    
+    # Start processing in background
+    # We use a thread instead of background_tasks to ensure it runs independently of response
+    thread = threading.Thread(target=process_job, args=(job_id, req.dataset_name))
+    thread.start()
+    
+    return {"job_id": job_id, "status": "processing", "message": "Job started in background"}
+
+
+@app.get("/status/{job_id}", response_model=JobStatusResponse)
+def get_job_status(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    job_info = jobs[job_id]
+    return JobStatusResponse(
+        job_id=job_id,
+        status=job_info["status"],
+        logs=job_info["logs"],
+        result=job_info.get("result"),
+        error=job_info.get("error")
+    )
