@@ -1780,7 +1780,7 @@ async def upload_dataset(
         # Validate dataset structure by checking S3 for required folders
         # Only data/ folder is required; meta/ folder is optional
         # Videos can be either in videos/ subfolder or directly in root
-        required_folders = ["data"]
+        required_folders = []
         folder_exists = {folder: False for folder in required_folders}
         has_videos_folder = False
         has_videos_in_root = False
@@ -1942,7 +1942,7 @@ async def upload_dataset_from_s3(request: S3UploadRequest):
         # Validate dataset structure
         # Only data/ folder is required; meta/ folder is optional
         # Videos can be either in videos/ subfolder or directly in root
-        required_folders = ["data"]
+        required_folders = []
         missing_folders = [folder for folder in required_folders if not (upload_dir / folder).exists()]
         if missing_folders:
             raise HTTPException(
