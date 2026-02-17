@@ -862,6 +862,14 @@ class AugmentationRequest(BaseModel):
     prompt: str
     task_description: Optional[str] = ""
     axes: Optional[List[str]] = None
+    # Export configuration
+    export_mode: Optional[str] = None  # 'local' or 's3'
+    local_path: Optional[str] = None
+    s3_bucket: Optional[str] = None
+    s3_region: Optional[str] = None
+    s3_path: Optional[str] = None
+    s3_access_key: Optional[str] = None
+    s3_secret_key: Optional[str] = None
 
 class OptimizationRequest(BaseModel):
     dataset_name: str
@@ -2200,11 +2208,11 @@ async def load_dataset(request: DatasetLoadRequest):
         
         # Only data/ folder is required; meta/ folder is optional
         # Videos can be either in videos/ subfolder or directly in root
-        if not (dataset_path / "data").exists():
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid dataset structure. Directory must contain 'data/' folder. 'meta/' folder is optional."
-            )
+        #if not (dataset_path / "data").exists():
+         #   raise HTTPException(
+          #      status_code=400,
+           #     detail="Invalid dataset structure. Directory must contain 'data/' folder. 'meta/' folder is optional."
+            #)
         
         # Check for videos in either videos/ subfolder or root
         videos_folder = dataset_path / "videos"
@@ -2607,8 +2615,8 @@ async def run_augmentation(
             
             while True:
                 # Check for global timeout (1 hour)
-                if time.time() - start_time > 3600:
-                    raise HTTPException(status_code=504, detail="RunPod job timed out after 1 hour")
+               # if time.time() - start_time > 3600:
+                #    raise HTTPException(status_code=504, detail="RunPod job timed out after 1 hour")
                 
                 try:
                     status_response = requests.get(status_endpoint, timeout=30)
@@ -2644,6 +2652,79 @@ async def run_augmentation(
             # Use the result from the completed job
             # result_body is already set above
             
+            # Handle export if requested
+            export_location = None
+            if request.export_mode and result_body.get("s3_url"):
+                try:
+                    output_s3_url = result_body.get("s3_url")
+                    print(f"Export mode: {request.export_mode}, Output S3 URL: {output_s3_url}")
+                    
+                    if request.export_mode == "local" and request.local_path:
+                        # Download from S3 and save to local directory
+                        import boto3
+                        from urllib.parse import urlparse
+                        
+                        # Parse S3 URL
+                        parsed = urlparse(output_s3_url)
+                        bucket = parsed.netloc
+                        key = parsed.path.lstrip('/')
+                        
+                        # Create local directory if it doesn't exist
+                        local_dir = Path(request.local_path)
+                        local_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        # Download file from S3
+                        s3_client = boto3.client('s3')
+                        filename = Path(key).name
+                        local_file_path = local_dir / filename
+                        
+                        print(f"Downloading from s3://{bucket}/{key} to {local_file_path}")
+                        s3_client.download_file(bucket, key, str(local_file_path))
+                        export_location = str(local_file_path)
+                        print(f"Successfully exported to local directory: {export_location}")
+                        
+                    elif request.export_mode == "s3" and request.s3_bucket:
+                        # Copy from default S3 location to user-specified S3 bucket
+                        import boto3
+                        from urllib.parse import urlparse
+                        
+                        # Parse source S3 URL
+                        parsed = urlparse(output_s3_url)
+                        source_bucket = parsed.netloc
+                        source_key = parsed.path.lstrip('/')
+                        
+                        # Create S3 client with user credentials if provided
+                        if request.s3_access_key and request.s3_secret_key:
+                            s3_client = boto3.client(
+                                's3',
+                                aws_access_key_id=request.s3_access_key,
+                                aws_secret_access_key=request.s3_secret_key,
+                                region_name=request.s3_region or 'us-east-1'
+                            )
+                        else:
+                            s3_client = boto3.client('s3')
+                        
+                        # Determine destination key
+                        filename = Path(source_key).name
+                        dest_key = f"{request.s3_path.rstrip('/')}/{filename}" if request.s3_path else filename
+                        
+                        # Copy object
+                        copy_source = {'Bucket': source_bucket, 'Key': source_key}
+                        print(f"Copying from s3://{source_bucket}/{source_key} to s3://{request.s3_bucket}/{dest_key}")
+                        s3_client.copy_object(
+                            CopySource=copy_source,
+                            Bucket=request.s3_bucket,
+                            Key=dest_key
+                        )
+                        export_location = f"s3://{request.s3_bucket}/{dest_key}"
+                        print(f"Successfully exported to S3: {export_location}")
+                        
+                except Exception as export_error:
+                    print(f"Warning: Export failed: {export_error}")
+                    # Don't fail the entire request if export fails
+                    export_location = f"Export failed: {str(export_error)}"
+            
+            
             return {
                 "success": True,
                 "dataset_name": request.dataset_name,
@@ -2654,6 +2735,7 @@ async def run_augmentation(
                 "s3_path": f"s3://{S3_BUCKET}/{S3_JOBS_PREFIX}/{job_id}/input/prompts/{prompt_folder_name}/",
                 "runpod_result": result_body,
                 "s3_url": result_body.get("s3_url"),
+                "export_location": export_location if request.export_mode else None,
                 "total_duration_seconds": total_duration,
                 "message": f"Generated {len(variations)} prompt variations and videos via RunPod pod"
             }

@@ -1424,8 +1424,7 @@ export default function Home() {
             </div>
           )}
         </main>
-      )
-      }
+      )}
 
       {/* Login Modal */}
       <LoginModal
