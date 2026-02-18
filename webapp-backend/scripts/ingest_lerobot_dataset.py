@@ -23,10 +23,52 @@ from tqdm import tqdm
 
 
 def load_metadata(dataset_path: Path) -> tuple[dict, pd.DataFrame]:
-    """Load dataset metadata and task descriptions."""
+    """Load dataset metadata and task descriptions.
+    
+    If meta folder doesn't exist, generates minimal metadata by counting video files.
+    """
     info_path = dataset_path / "meta/info.json"
     tasks_path = dataset_path / "meta/tasks.parquet"
+    
+    # Check if meta folder exists
+    meta_folder = dataset_path / "meta"
+    if not meta_folder.exists():
+        print(f"No meta folder found at {meta_folder}. Generating minimal metadata from video files...")
+        
+        # Count video files
+        videos_folder = dataset_path / "videos"
+        video_count = 0
+        
+        if videos_folder.exists():
+            # Count video files (episode_*.mp4 or any .mp4 files)
+            video_files = list(videos_folder.glob("*.mp4"))
+            video_count = len(video_files)
+            print(f"Found {video_count} video files in {videos_folder}")
+        else:
+            print(f"No videos folder found at {videos_folder}")
+        
+        # Generate minimal info dict
+        info = {
+            "codebase_version": "unknown",
+            "robot_type": "unknown",
+            "total_episodes": video_count,
+            "total_frames": 0,
+            "total_tasks": 1,
+            "total_videos": video_count,
+            "fps": 30,
+            "video_codec": "unknown",
+            "generated_from_videos": True  # Flag to indicate this was generated
+        }
+        
+        # Generate minimal tasks dataframe with one default task
+        tasks_df = pd.DataFrame({
+            "task_index": [0],
+            "task": ["default_task"]
+        })
+        
+        return info, tasks_df
 
+    # Original logic when meta folder exists
     with open(info_path, "r") as f:
         info = json.load(f)
 
@@ -152,12 +194,19 @@ def ingest_dataset(data_dir: str, engine_url: str, dataset_name: str) -> int:
     # Copy episode videos from dataset's videos directory to ARES_VIDEO_DIR
     copy_episode_videos(dataset_path, dataset_name)
     
-    # Iterate over chunks
-    for chunk_path in data_path.glob("chunk-*"):
-        if chunk_path.is_dir():
-            print(f"Processing chunk: {chunk_path.name}")
-            count = process_chunk(chunk_path, dataset_path, info, tasks_df, engine, dataset_name)
-            total_episodes += count
+    # Check if data folder exists
+    if data_path.exists():
+        # Iterate over chunks
+        for chunk_path in data_path.glob("chunk-*"):
+            if chunk_path.is_dir():
+                print(f"Processing chunk: {chunk_path.name}")
+                count = process_chunk(chunk_path, dataset_path, info, tasks_df, engine, dataset_name)
+                total_episodes += count
+    else:
+        # No data folder - use episode count from metadata (generated from video files)
+        print(f"No data folder found at {data_path}. Using episode count from metadata.")
+        total_episodes = info.get("total_episodes", 0)
+        print(f"Episode count from metadata: {total_episodes}")
     
     print(f"Ingestion complete. Total episodes processed: {total_episodes} (videos copied, database records skipped)")
     return total_episodes
