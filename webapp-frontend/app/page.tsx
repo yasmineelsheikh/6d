@@ -896,7 +896,7 @@ export default function Home() {
           <div className="px-4">
             <button
               onClick={() => setIsTaskModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#4b6671] hover:bg-[#3d5560] transition-colors rounded-lg"
+              className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-semibold tracking-wide uppercase text-white bg-gradient-to-r from-[#4b6671] to-[#3d5f6f] hover:from-[#567a86] hover:to-[#4b6f7f] transition-all rounded-xl shadow-lg shadow-[#4b6671]/20 hover:shadow-[#4b6671]/30"
             >
               <Plus className="w-3.5 h-3.5" />
               New Task

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { Loader2, XCircle, Menu, Zap, ArrowRight } from 'lucide-react'
+import { Loader2, XCircle, Menu, Zap } from 'lucide-react'
 import SideMenu from '@/components/SideMenu'
 import TaskModal, { TaskData } from '@/components/TaskModal'
 import SettingsModal, { SettingsData } from '@/components/SettingsModal'
@@ -259,11 +259,7 @@ export default function DatasetPage() {
 
   // ── Sidebar metrics ──
   const totalSamples = datasetInfo?.total_episodes || 0
-  const recommendations = [
-    ...(totalSamples > 0 ? [] : [{ label: 'Upload initial data', tab: 'actions' as TabKey }]),
-    { label: 'Run augmentation', tab: 'actions' as TabKey },
-    { label: 'Import test run data', tab: 'test-runs' as TabKey },
-  ]
+  const hasNoData = !datasetInfo && !loading
 
   return (
     <div className="min-h-screen bg-[#1a1a1a] text-[#d4d4d4]">
@@ -310,20 +306,6 @@ export default function DatasetPage() {
               <div className="flex items-center justify-between"><span className="text-[11px] text-[#9aa4b5]">Episodes</span><span className="text-xs font-mono text-white">{datasetData.length}</span></div>
             </div>
           </div>
-
-          {/* Recommendations */}
-          <div>
-            <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Suggested Actions</span>
-            <div className="mt-2 space-y-1.5">
-              {recommendations.map((rec, i) => (
-                <button key={i} onClick={() => setActiveTab(rec.tab)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-[#9aa4b5] hover:text-white hover:bg-white/5 rounded-lg transition-colors text-left">
-                  <ArrowRight className="w-3 h-3 flex-shrink-0" />
-                  <span>{rec.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
         </aside>
 
         {/* ── Main Content ── */}
@@ -351,7 +333,7 @@ export default function DatasetPage() {
           {/* Tab Content */}
           {!loading && (
             <div className="p-6">
-              {activeTab === 'overview' && <OverviewTab datasetName={datasetName} datasetInfo={datasetInfo} aresDistributions={aresDistributions} newDistributions={newDistributions} distributionsLoading={distributionsLoading} analysisView={analysisView} setAnalysisView={setAnalysisView} analysisSwitchEnabled={analysisSwitchEnabled} variationsIncluded={variationsIncluded} />}
+              {activeTab === 'overview' && <OverviewTab datasetName={datasetName} datasetInfo={datasetInfo} aresDistributions={aresDistributions} newDistributions={newDistributions} distributionsLoading={distributionsLoading} analysisView={analysisView} setAnalysisView={setAnalysisView} analysisSwitchEnabled={analysisSwitchEnabled} variationsIncluded={variationsIncluded} hasNoData={hasNoData} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
               {activeTab === 'history' && <HistoryTab />}
               {activeTab === 'test-runs' && <TestRunsTab datasetName={datasetName} datasetData={datasetData} />}
               {activeTab === 'actions' && <ActionsTab datasetName={datasetName} datasetData={datasetData} onAugmentationComplete={handleAugmentationComplete} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
