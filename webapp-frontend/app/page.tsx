@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight, Folder, Cloud, Plus, Bell, ArrowRight, TrendingUp, AlertCircle } from 'lucide-react'
+import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight, Folder, Cloud, Plus, ArrowRight, TrendingUp, AlertCircle } from 'lucide-react'
 import DatasetOverview from '@/components/DatasetOverview'
 import DatasetDistributions from '@/components/DatasetDistributions'
 import EpisodePreview from '@/components/EpisodePreview'
@@ -213,8 +213,6 @@ export default function Home() {
   const [evalSelectedTask, setEvalSelectedTask] = useState<string>('Stack Cups')
   const [evalNewTaskName, setEvalNewTaskName] = useState('')
 
-  // Action queue collapsed state
-  const [isActionQueueExpanded, setIsActionQueueExpanded] = useState(true)
 
   // Debug: verify API base URL at runtime
   useEffect(() => {
@@ -767,26 +765,6 @@ export default function Home() {
     return { total, flagged, pendingReviews }
   }, [evaluationTasks])
 
-  const recommendations = useMemo(() => {
-    const recs: Array<{ taskName: string; message: string }> = []
-    evaluationTasks.forEach(t => {
-      if (t.sessions.length === 0) {
-        recs.push({ taskName: t.name, message: 'No data yet — upload initial dataset' })
-      } else {
-        const lastSession = t.sessions[t.sessions.length - 1]
-        if (lastSession.successRate < 80) {
-          recs.push({ taskName: t.name, message: `Success rate at ${lastSession.successRate}% — consider augmentation` })
-        }
-        if (t.sessions.length >= 2) {
-          const prev = t.sessions[t.sessions.length - 2].successRate
-          if (lastSession.successRate < prev) {
-            recs.push({ taskName: t.name, message: `Performance declined from ${prev}% to ${lastSession.successRate}%` })
-          }
-        }
-      }
-    })
-    return recs
-  }, [evaluationTasks])
 
   // Show loading screen while checking auth
   if (authLoading) {
@@ -944,147 +922,82 @@ export default function Home() {
           </div>
 
           <main className="max-w-7xl mx-auto px-6 py-8">
-            <div className="flex gap-8">
-              {/* Task Cards Grid */}
-              <div className="flex-1">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {sortedTasks.map(task => {
-                    const totalEpisodes = task.sessions.reduce((sum, s) => sum + s.episodeCount, 0)
-                    const avgSuccess = task.sessions.length > 0
-                      ? Math.round(task.sessions.reduce((sum, s) => sum + s.successRate, 0) / task.sessions.length)
-                      : null
-                    const successRates = task.sessions.map(s => s.successRate)
-                    const lastUpdated = task.sessions.length > 0
-                      ? task.sessions[task.sessions.length - 1].uploadedAt
-                      : null
-                    const isFlagged = task.sessions.length === 0 ||
-                      (task.sessions.length >= 2 && task.sessions[task.sessions.length - 1].successRate < task.sessions[task.sessions.length - 2].successRate)
+            {/* Task Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {sortedTasks.map(task => {
+                const totalEpisodes = task.sessions.reduce((sum, s) => sum + s.episodeCount, 0)
+                const avgSuccess = task.sessions.length > 0
+                  ? Math.round(task.sessions.reduce((sum, s) => sum + s.successRate, 0) / task.sessions.length)
+                  : null
+                const successRates = task.sessions.map(s => s.successRate)
+                const lastUpdated = task.sessions.length > 0
+                  ? task.sessions[task.sessions.length - 1].uploadedAt
+                  : null
+                const isFlagged = task.sessions.length === 0 ||
+                  (task.sessions.length >= 2 && task.sessions[task.sessions.length - 1].successRate < task.sessions[task.sessions.length - 2].successRate)
 
-                    return (
-                      <button
-                        key={task.id}
-                        onClick={() => router.push(`/dataset/${encodeURIComponent(task.name)}`)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-5 text-left hover:bg-white/[0.07] hover:border-white/[0.15] transition-all group"
-                      >
-                        {/* Card header */}
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex items-center gap-2.5">
-                            <StatusDot rate={avgSuccess} />
-                            <h3 className="text-sm font-medium text-white group-hover:text-white/90">{task.name}</h3>
-                          </div>
-                          {isFlagged && (
-                            <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-[#c0a854] bg-[#c0a854]/10 rounded-full">
-                              <AlertCircle className="w-2.5 h-2.5" />
-                              Attention
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Sparkline */}
-                        <div className="mb-4 flex items-center gap-3">
-                          {successRates.length >= 2 ? (
-                            <>
-                              <Sparkline values={successRates} width={100} height={28} />
-                              <span className={cn(
-                                "text-xs font-mono",
-                                avgSuccess !== null && avgSuccess >= 85 ? 'text-[#5fa35f]' :
-                                  avgSuccess !== null && avgSuccess >= 70 ? 'text-[#c0a854]' : 'text-[#cc6666]'
-                              )}>
-                                {avgSuccess}%
-                              </span>
-                            </>
-                          ) : avgSuccess !== null ? (
-                            <span className={cn(
-                              "text-xs font-mono",
-                              avgSuccess >= 85 ? 'text-[#5fa35f]' :
-                                avgSuccess >= 70 ? 'text-[#c0a854]' : 'text-[#cc6666]'
-                            )}>
-                              {avgSuccess}% avg
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-[#555] italic">No data</span>
-                          )}
-                        </div>
-
-                        {/* Health indicators */}
-                        <div className="flex items-center gap-4 text-[11px] text-[#9aa4b5]">
-                          <span>{totalEpisodes} samples</span>
-                          <span className="text-[#2a2a2a]">·</span>
-                          <span>{task.sessions.length} sessions</span>
-                          {lastUpdated && (
-                            <>
-                              <span className="text-[#2a2a2a]">·</span>
-                              <span>{lastUpdated}</span>
-                            </>
-                          )}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Action Queue — Right Panel */}
-              {recommendations.length > 0 && (
-                <div className="hidden xl:block w-72 flex-shrink-0">
-                  <div className="sticky top-14">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <Bell className="w-3.5 h-3.5 text-[#666]" />
-                        <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Action Queue</span>
+                return (
+                  <button
+                    key={task.id}
+                    onClick={() => router.push(`/dataset/${encodeURIComponent(task.name)}`)}
+                    className="bg-white/5 border border-white/10 rounded-xl p-5 text-left hover:bg-white/[0.07] hover:border-white/[0.15] transition-all group"
+                  >
+                    {/* Card header */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-2.5">
+                        <StatusDot rate={avgSuccess} />
+                        <h3 className="text-sm font-medium text-white group-hover:text-white/90">{task.name}</h3>
                       </div>
-                      <span className="text-[10px] text-[#555] font-mono">{recommendations.length}</span>
+                      {isFlagged && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-[#c0a854] bg-[#c0a854]/10 rounded-full">
+                          <AlertCircle className="w-2.5 h-2.5" />
+                          Attention
+                        </span>
+                      )}
                     </div>
-                    <div className="space-y-2">
-                      {recommendations.map((rec, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => router.push(`/dataset/${encodeURIComponent(rec.taskName)}`)}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-left hover:bg-white/[0.07] hover:border-white/[0.15] transition-all group"
-                        >
-                          <div className="text-[11px] font-medium text-white mb-1 group-hover:text-white/90">{rec.taskName}</div>
-                          <div className="text-[11px] text-[#9aa4b5] leading-relaxed">{rec.message}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
 
-            {/* Action Queue — Mobile/Tablet banner (collapsed) */}
-            {recommendations.length > 0 && (
-              <div className="xl:hidden mt-6">
-                <button
-                  onClick={() => setIsActionQueueExpanded(!isActionQueueExpanded)}
-                  className="w-full flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <Bell className="w-3.5 h-3.5 text-[#666]" />
-                    <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Action Queue</span>
-                    <span className="text-[10px] text-[#555] font-mono ml-1">{recommendations.length}</span>
-                  </div>
-                  {isActionQueueExpanded
-                    ? <ChevronDown className="w-3.5 h-3.5 text-[#666]" />
-                    : <ChevronRight className="w-3.5 h-3.5 text-[#666]" />
-                  }
-                </button>
-                {isActionQueueExpanded && (
-                  <div className="mt-2 space-y-2">
-                    {recommendations.map((rec, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => router.push(`/dataset/${encodeURIComponent(rec.taskName)}`)}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-left hover:bg-white/[0.07] transition-all"
-                      >
-                        <div className="text-[11px] font-medium text-white mb-1">{rec.taskName}</div>
-                        <div className="text-[11px] text-[#9aa4b5]">{rec.message}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                    {/* Sparkline */}
+                    <div className="mb-4 flex items-center gap-3">
+                      {successRates.length >= 2 ? (
+                        <>
+                          <Sparkline values={successRates} width={100} height={28} />
+                          <span className={cn(
+                            "text-xs font-mono",
+                            avgSuccess !== null && avgSuccess >= 85 ? 'text-[#5fa35f]' :
+                              avgSuccess !== null && avgSuccess >= 70 ? 'text-[#c0a854]' : 'text-[#cc6666]'
+                          )}>
+                            {avgSuccess}%
+                          </span>
+                        </>
+                      ) : avgSuccess !== null ? (
+                        <span className={cn(
+                          "text-xs font-mono",
+                          avgSuccess >= 85 ? 'text-[#5fa35f]' :
+                            avgSuccess >= 70 ? 'text-[#c0a854]' : 'text-[#cc6666]'
+                        )}>
+                          {avgSuccess}% avg
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-[#555] italic">No data</span>
+                      )}
+                    </div>
+
+                    {/* Health indicators */}
+                    <div className="flex items-center gap-4 text-[11px] text-[#9aa4b5]">
+                      <span>{totalEpisodes} samples</span>
+                      <span className="text-[#2a2a2a]">·</span>
+                      <span>{task.sessions.length} sessions</span>
+                      {lastUpdated && (
+                        <>
+                          <span className="text-[#2a2a2a]">·</span>
+                          <span>{lastUpdated}</span>
+                        </>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </main>
         </>
       )}

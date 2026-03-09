@@ -82,7 +82,7 @@ export default function SettingsTab({ environment, isIndoor, setIsIndoor, isOutd
             <div className="flex gap-4 border-b border-white/10 pb-px">
                 <button onClick={() => { setActiveSection('analysis'); setError(null); setSuccess(null) }}
                     className={`pb-2 text-xs font-medium border-b-2 transition-colors ${activeSection === 'analysis' ? 'border-[#4b6671] text-white' : 'border-transparent text-[#9aa4b5] hover:text-[#d4d4d4]'}`}>
-                    Analysis Config
+                    Augmentation Settings
                 </button>
                 <button onClick={() => { setActiveSection('password'); setError(null); setSuccess(null) }}
                     className={`pb-2 text-xs font-medium flex items-center gap-1.5 border-b-2 transition-colors ${activeSection === 'password' ? 'border-[#4b6671] text-white' : 'border-transparent text-[#9aa4b5] hover:text-[#d4d4d4]'}`}>
@@ -125,8 +125,8 @@ export default function SettingsTab({ environment, isIndoor, setIsIndoor, isOutd
                                 {availableAxes.map(axis => (
                                     <button key={axis} type="button" onClick={() => toggleAxis(axis)}
                                         className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${selectedAxes.includes(axis)
-                                                ? 'bg-white/10 border-white/20 text-white'
-                                                : 'bg-transparent border-white/10 text-[#9aa4b5] hover:text-[#d4d4d4]'
+                                            ? 'bg-white/10 border-white/20 text-white'
+                                            : 'bg-transparent border-white/10 text-[#9aa4b5] hover:text-[#d4d4d4]'
                                             }`}>
                                         {axis}
                                     </button>

@@ -306,9 +306,9 @@ export default function DatasetPage() {
         </aside>
 
         {/* ── Main Content ── */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 flex flex-col min-h-0">
           {/* Tabs */}
-          <div className="border-b border-[#2a2a2a] bg-[#1a1a1a] sticky top-[40px] z-40">
+          <div className="border-b border-[#2a2a2a] bg-[#1a1a1a] flex-shrink-0 z-40">
             <div className="flex gap-0 px-6">
               {TABS.map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key)}
@@ -321,22 +321,25 @@ export default function DatasetPage() {
             </div>
           </div>
 
-          {/* Error */}
-          {error && (<div className="mx-6 mt-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] rounded-xl flex items-center gap-2"><XCircle className="w-3.5 h-3.5 text-[#cc6666]" /><span className="text-xs text-[#cc6666]">{error}</span></div>)}
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-y-auto">
+            {/* Error */}
+            {error && (<div className="mx-6 mt-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] rounded-xl flex items-center gap-2"><XCircle className="w-3.5 h-3.5 text-[#cc6666]" /><span className="text-xs text-[#cc6666]">{error}</span></div>)}
 
-          {/* Loading */}
-          {loading && <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-[#9aa4b5]" /></div>}
+            {/* Loading */}
+            {loading && <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-[#9aa4b5]" /></div>}
 
-          {/* Tab Content */}
-          {!loading && (
-            <div className="p-6">
-              {activeTab === 'overview' && <OverviewTab datasetName={datasetName} datasetInfo={datasetInfo} aresDistributions={aresDistributions} newDistributions={newDistributions} distributionsLoading={distributionsLoading} analysisView={analysisView} setAnalysisView={setAnalysisView} analysisSwitchEnabled={analysisSwitchEnabled} variationsIncluded={variationsIncluded} hasNoData={hasNoData} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
-              {activeTab === 'history' && <HistoryTab />}
-              {activeTab === 'test-runs' && <TestRunsTab datasetName={datasetName} datasetData={datasetData} />}
-              {activeTab === 'actions' && <ActionsTab datasetName={datasetName} datasetData={datasetData} onAugmentationComplete={handleAugmentationComplete} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
-              {activeTab === 'settings' && <SettingsTab environment={environment} isIndoor={isIndoor} setIsIndoor={setIsIndoor} isOutdoor={isOutdoor} setIsOutdoor={setIsOutdoor} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} />}
-            </div>
-          )}
+            {/* Tab Content */}
+            {!loading && (
+              <div className="p-6">
+                {activeTab === 'overview' && <OverviewTab datasetName={datasetName} datasetInfo={datasetInfo} aresDistributions={aresDistributions} newDistributions={newDistributions} distributionsLoading={distributionsLoading} analysisView={analysisView} setAnalysisView={setAnalysisView} analysisSwitchEnabled={analysisSwitchEnabled} variationsIncluded={variationsIncluded} hasNoData={hasNoData} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
+                {activeTab === 'history' && <HistoryTab />}
+                {activeTab === 'test-runs' && <TestRunsTab datasetName={datasetName} datasetData={datasetData} />}
+                {activeTab === 'actions' && <ActionsTab datasetName={datasetName} datasetData={datasetData} onAugmentationComplete={handleAugmentationComplete} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
+                {activeTab === 'settings' && <SettingsTab environment={environment} isIndoor={isIndoor} setIsIndoor={setIsIndoor} isOutdoor={isOutdoor} setIsOutdoor={setIsOutdoor} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} />}
+              </div>
+            )}
+          </div>
         </main>
       </div>
 
