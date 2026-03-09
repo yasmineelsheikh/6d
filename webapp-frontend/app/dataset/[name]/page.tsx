@@ -192,9 +192,12 @@ export default function DatasetPage() {
   }, [ingestionComplete, datasetName, environment, selectedAxes, analysisView])
 
   // ── Ingestion status polling ──
+  // When navigating to a task, try to load data. If the backend returns 500
+  // (e.g. database not found), skip straight to the empty/no-data state
+  // instead of retrying in a loop.
   useEffect(() => {
     if (!datasetName) { setWaitingForIngestion(false); setIngestionComplete(true); return }
-    let isMounted = true; let retryCount = 0
+    let isMounted = true
     const checkIngestionStatus = async () => {
       if (!isMounted) return
       try {
@@ -206,18 +209,22 @@ export default function DatasetPage() {
         if (distResponse.ok) {
           const distData = await distResponse.json()
           if (distData.ingestion_status === 'in_progress') {
-            retryCount++
-            if (retryCount < 300) setTimeout(checkIngestionStatus, 1000)
-            else if (isMounted) { setIngestionProgress(100); setIngestionComplete(true); setWaitingForIngestion(false) }
+            // Still ingesting — poll again
+            setTimeout(checkIngestionStatus, 1000)
             return
           }
+          // Ingestion complete or not applicable — load dataset
           if (isMounted) { setIngestionProgress(100); setIngestionComplete(true); setWaitingForIngestion(false); handleDatasetLoaded(datasetName) }
         } else {
-          retryCount++
-          if (retryCount < 10) setTimeout(checkIngestionStatus, 1000)
-          else if (isMounted) { setIngestionProgress(100); setIngestionComplete(true); setWaitingForIngestion(false); handleDatasetLoaded(datasetName) }
+          // Server error (500) or not-found — proceed to empty state, no retry loop
+          console.warn(`Distributions endpoint returned ${distResponse.status} for ${datasetName}, proceeding to empty state`)
+          if (isMounted) { setIngestionProgress(100); setIngestionComplete(true); setWaitingForIngestion(false); setLoading(false) }
         }
-      } catch { retryCount++; if (retryCount < 10) setTimeout(checkIngestionStatus, 1000); else if (isMounted) { setIngestionProgress(100); setIngestionComplete(true); setWaitingForIngestion(false); handleDatasetLoaded(datasetName) } }
+      } catch (err) {
+        // Network error — proceed to empty state
+        console.warn('Failed to check ingestion status:', err)
+        if (isMounted) { setIngestionProgress(100); setIngestionComplete(true); setWaitingForIngestion(false); setLoading(false) }
+      }
     }
     setWaitingForIngestion(true); setIngestionComplete(false); setIngestionProgress(0); checkIngestionStatus()
     return () => { isMounted = false }
@@ -258,7 +265,6 @@ export default function DatasetPage() {
   if (waitingForIngestion || !ingestionComplete) return (<div className="min-h-screen bg-[#1a1a1a] flex items-center justify-center"><div className="w-full max-w-md px-8"><div className="h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden"><div className="h-full bg-[#9aa4b5] rounded-full transition-all duration-500 ease-out" style={{ width: `${ingestionProgress}%` }} /></div></div></div>)
 
   // ── Sidebar metrics ──
-  const totalSamples = datasetInfo?.total_episodes || 0
   const hasNoData = !datasetInfo && !loading
 
   return (
@@ -297,15 +303,6 @@ export default function DatasetPage() {
             {datasetInfo?.robot_type && <p className="text-[11px] text-[#9aa4b5] mt-1">{datasetInfo.robot_type}</p>}
             {environment && <span className="inline-block mt-2 px-2 py-0.5 text-[10px] text-[#9aa4b5] bg-white/5 border border-white/10 rounded-full">{environment}</span>}
           </div>
-
-          {/* Dataset Vitals */}
-          <div>
-            <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Dataset Vitals</span>
-            <div className="mt-2 space-y-2">
-              <div className="flex items-center justify-between"><span className="text-[11px] text-[#9aa4b5]">Total Samples</span><span className="text-xs font-mono text-white">{totalSamples}</span></div>
-              <div className="flex items-center justify-between"><span className="text-[11px] text-[#9aa4b5]">Episodes</span><span className="text-xs font-mono text-white">{datasetData.length}</span></div>
-            </div>
-          </div>
         </aside>
 
         {/* ── Main Content ── */}
@@ -337,7 +334,7 @@ export default function DatasetPage() {
               {activeTab === 'history' && <HistoryTab />}
               {activeTab === 'test-runs' && <TestRunsTab datasetName={datasetName} datasetData={datasetData} />}
               {activeTab === 'actions' && <ActionsTab datasetName={datasetName} datasetData={datasetData} onAugmentationComplete={handleAugmentationComplete} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
-              {activeTab === 'settings' && <SettingsTab />}
+              {activeTab === 'settings' && <SettingsTab environment={environment} isIndoor={isIndoor} setIsIndoor={setIsIndoor} isOutdoor={isOutdoor} setIsOutdoor={setIsOutdoor} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} />}
             </div>
           )}
         </main>
