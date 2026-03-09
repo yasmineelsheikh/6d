@@ -268,7 +268,7 @@ export default function DatasetPage() {
   const hasNoData = !datasetInfo && !loading
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a] text-[#d4d4d4]">
+    <div className="min-h-screen bg-[#1a1a1a] text-white">
       <SideMenu isOpen={isSideMenuOpen} onToggle={() => setIsSideMenuOpen(!isSideMenuOpen)}
         onAddTask={() => router.push('/')} onOpenSettings={() => setIsSettingsModalOpen(true)}
         onOpenBilling={() => setIsBillingModalOpen(true)}
@@ -283,10 +283,10 @@ export default function DatasetPage() {
       <header className="border-b border-[#2a2a2a] bg-[#222222] sticky top-0 z-50">
         <div className="flex items-center justify-between h-10">
           <div className="flex items-center h-full">
-            <button onClick={() => setIsSideMenuOpen(!isSideMenuOpen)} className="px-4 h-full text-[#d4d4d4] hover:text-white hover:bg-[#2a2a2a] transition-colors border-r border-[#2a2a2a]" aria-label="Toggle menu"><Menu className="w-4 h-4" /></button>
+            <button onClick={() => setIsSideMenuOpen(!isSideMenuOpen)} className="px-4 h-full text-white/40 hover:text-white hover:bg-[#2a2a2a] transition-colors border-r border-[#2a2a2a]" aria-label="Toggle menu"><Menu className="w-4 h-4" /></button>
             <div className="flex items-center gap-4 px-6">
               <h1 className="text-sm font-medium tracking-wide text-white cursor-pointer hover:text-white/80" onClick={() => router.push('/')}>6d labs</h1>
-              {datasetName && (<><div className="h-3 w-px bg-[#2a2a2a]" /><span className="text-xs text-[#b5becb] font-mono">{decodeURIComponent(datasetName)}</span></>)}
+              {datasetName && (<><div className="h-3 w-px bg-[#2a2a2a]" /><span className="text-xs text-white/40 font-mono">{decodeURIComponent(datasetName)}</span></>)}
             </div>
           </div>
           <div className="px-4">
@@ -300,8 +300,8 @@ export default function DatasetPage() {
         <aside className="w-[260px] flex-shrink-0 bg-[#1e1e1e] border-r border-[#2a2a2a] p-5 space-y-6 overflow-y-auto">
           <div>
             <h2 className="text-lg font-light text-white">{decodeURIComponent(datasetName)}</h2>
-            {datasetInfo?.robot_type && <p className="text-[11px] text-[#9aa4b5] mt-1">{datasetInfo.robot_type}</p>}
-            {environment && <span className="inline-block mt-2 px-2 py-0.5 text-[10px] text-[#9aa4b5] bg-white/5 border border-white/10 rounded-full">{environment}</span>}
+            {datasetInfo?.robot_type && <p className="text-[11px] text-white/40 mt-1">{datasetInfo.robot_type}</p>}
+            {environment && <span className="inline-block mt-2 px-2 py-0.5 text-[10px] text-white/40 bg-white/5 border border-white/10 rounded-full">{environment}</span>}
           </div>
         </aside>
 
@@ -313,7 +313,7 @@ export default function DatasetPage() {
               {TABS.map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                   className={cn("px-4 py-3 text-xs font-medium transition-colors relative",
-                    activeTab === tab.key ? 'text-white' : 'text-[#9aa4b5] hover:text-[#d4d4d4]')}>
+                    activeTab === tab.key ? 'text-white' : 'text-white/40 hover:text-white')}>
                   {tab.label}
                   {activeTab === tab.key && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4b6671]" />}
                 </button>
@@ -327,7 +327,7 @@ export default function DatasetPage() {
             {error && (<div className="mx-6 mt-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] rounded-xl flex items-center gap-2"><XCircle className="w-3.5 h-3.5 text-[#cc6666]" /><span className="text-xs text-[#cc6666]">{error}</span></div>)}
 
             {/* Loading */}
-            {loading && <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-[#9aa4b5]" /></div>}
+            {loading && <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-white/40" /></div>}
 
             {/* Tab Content */}
             {!loading && (

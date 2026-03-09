@@ -5,9 +5,9 @@ import dynamic from 'next/dynamic'
 
 const Plot = dynamic(
   () => import('react-plotly.js'),
-  { 
+  {
     ssr: false,
-    loading: () => <div className="h-[400px] flex items-center justify-center text-slate-500">Loading chart...</div>
+    loading: () => <div className="h-[400px] flex items-center justify-center text-white/30">Loading chart...</div>
   }
 )
 
@@ -26,8 +26,8 @@ interface DatasetDistributionsProps {
 type MainTab = 'environment' | 'state-space' | 'action-space'
 type EnvironmentSubTab = 'objects' | 'lighting' | 'materials'
 
-export default function DatasetDistributions({ 
-  datasetName, 
+export default function DatasetDistributions({
+  datasetName,
   isCurated = false,
   aresDistributions = [],
   loading = false
@@ -35,7 +35,7 @@ export default function DatasetDistributions({
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('environment')
   const [activeEnvSubTab, setActiveEnvSubTab] = useState<EnvironmentSubTab>('objects')
   const [activeStateSubTab, setActiveStateSubTab] = useState<'trajectory'>('trajectory')
-  
+
   // Auto-select first available tab when distributions load
   useEffect(() => {
     if (aresDistributions.length > 0 && activeMainTab === 'environment') {
@@ -50,12 +50,12 @@ export default function DatasetDistributions({
       }
     }
   }, [aresDistributions, activeMainTab, activeEnvSubTab])
-  
+
   // Map ares distribution titles to sub-tabs
   const getDistributionByTitle = (title: string): Visualization | undefined => {
     return aresDistributions.find(viz => viz.title.toLowerCase() === title.toLowerCase())
   }
-  
+
   const objectsDist = getDistributionByTitle('Objects')
   const lightingDist = getDistributionByTitle('Lighting')
   const materialsDist = getDistributionByTitle('Materials')
@@ -101,11 +101,11 @@ export default function DatasetDistributions({
     })),
     layout: {
       title: '',
-      xaxis: { title: '', showgrid: true, gridcolor: '#343a46', color: '#b5becb' },
-      yaxis: { title: '', showgrid: true, gridcolor: '#343a46', color: '#b5becb' },
+      xaxis: { title: '', showgrid: true, gridcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)' },
+      yaxis: { title: '', showgrid: true, gridcolor: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)' },
       plot_bgcolor: 'transparent',
       paper_bgcolor: 'transparent',
-      font: { color: '#b5becb', size: 11 },
+      font: { color: 'rgba(255,255,255,0.6)', size: 11 },
       height: 400,
       margin: { l: 40, r: 40, t: 20, b: 40 },
     },
@@ -114,32 +114,31 @@ export default function DatasetDistributions({
 
   return (
     <div>
-      <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Distribution</h2>
+      <h2 className="text-xs font-medium mb-3 text-white">Dataset Distribution</h2>
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3">
         {/* Main tabs */}
-        <div className="flex gap-0 mb-3 border-b border-[#2a2a2a]">
+        <div className="flex gap-0 mb-3 border-b border-white/10">
           <button
             onClick={() => setActiveMainTab('environment')}
-            className={`px-4 py-2 text-sm font-medium transition-colors relative ${
-              activeMainTab === 'environment'
-                ? 'text-[#e3e8f0]'
-                : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
-            }`}
+            className={`px-4 py-2 text-sm font-medium transition-colors relative ${activeMainTab === 'environment'
+                ? 'text-white'
+                : 'text-white/40 hover:text-white'
+              }`}
           >
             Environment
             {activeMainTab === 'environment' && (
-              <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
+              <span className="absolute bottom-0 left-0 right-0 h-px bg-[#4b6671]" />
             )}
           </button>
           <button
             type="button"
-            className="px-4 py-2 text-sm font-medium text-[#555c6b] cursor-not-allowed opacity-50"
+            className="px-4 py-2 text-sm font-medium text-white/20 cursor-not-allowed"
           >
             State-Space
           </button>
           <button
             type="button"
-            className="px-4 py-2 text-sm font-medium text-[#555c6b] cursor-not-allowed opacity-50"
+            className="px-4 py-2 text-sm font-medium text-white/20 cursor-not-allowed"
           >
             Action-Space
           </button>
@@ -147,22 +146,21 @@ export default function DatasetDistributions({
 
         {/* Sub-tabs for Environment - show all available distributions */}
         {activeMainTab === 'environment' && aresDistributions.length > 0 && (
-          <div className="flex gap-0 mb-3 border-b border-[#2a2a2a]">
+          <div className="flex gap-0 mb-3 border-b border-white/10">
             {aresDistributions.map((dist, idx) => {
               const tabKey = dist.title.toLowerCase().replace(/\s+/g, '-')
               return (
                 <button
                   key={idx}
                   onClick={() => setActiveEnvSubTab(tabKey as EnvironmentSubTab)}
-                  className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${
-                    activeEnvSubTab === tabKey
-                      ? 'text-[#e3e8f0]'
-                      : 'text-[#9aa4b5] hover:text-[#e3e8f0]'
-                  }`}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${activeEnvSubTab === tabKey
+                      ? 'text-white'
+                      : 'text-white/40 hover:text-white'
+                    }`}
                 >
                   {dist.title}
                   {activeEnvSubTab === tabKey && (
-                    <span className="absolute bottom-0 left-0 right-0 h-px bg-[#154e72]" />
+                    <span className="absolute bottom-0 left-0 right-0 h-px bg-[#4b6671]" />
                   )}
                 </button>
               )
@@ -172,17 +170,17 @@ export default function DatasetDistributions({
 
         {/* Sub-tabs for State-space (disabled / coming soon) */}
         {activeMainTab === 'state-space' && (
-          <div className="mb-3 text-[10px] text-[#7a8291] italic">
+          <div className="mb-3 text-[10px] text-white/30 italic">
             State-space visualizations coming soon.
           </div>
         )}
 
         {/* Content area */}
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a]">
+        <div className="bg-[#1a1a1a] border border-white/10">
           {activeMainTab === 'environment' && (
             <>
               {loading ? (
-                <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
+                <div className="h-[400px] flex items-center justify-center text-white/30 text-xs">
                   Loading distributions...
                 </div>
               ) : aresDistributions.length > 0 ? (
@@ -192,30 +190,30 @@ export default function DatasetDistributions({
                     // Show plot if it matches active tab, or show all if no tab is selected
                     const shouldShow = !activeEnvSubTab || activeEnvSubTab === tabKey
                     return shouldShow && dist.figure ? (
-                      <Plot 
+                      <Plot
                         key={idx}
-                        data={dist.figure.data} 
-                        layout={dist.figure.layout} 
-                        config={{ displayModeBar: false }} 
+                        data={dist.figure.data}
+                        layout={dist.figure.layout}
+                        config={{ displayModeBar: false }}
                         style={{ width: '100%', height: '400px' }}
                       />
                     ) : null
                   })}
                 </div>
               ) : (
-                <div className="h-[400px] flex items-center justify-center text-[#8a8a8a] text-xs">
+                <div className="h-[400px] flex items-center justify-center text-white/30 text-xs">
                   No distributions available
                 </div>
               )}
             </>
           )}
           {activeMainTab === 'state-space' && (
-            <div className="h-[400px] flex items-center justify-center text-[#7a8291] text-xs italic">
+            <div className="h-[400px] flex items-center justify-center text-white/30 text-xs italic">
               State-space plots are not yet available.
             </div>
           )}
           {activeMainTab === 'action-space' && (
-            <div className="h-[400px] flex items-center justify-center text-[#7a8291] text-xs italic">
+            <div className="h-[400px] flex items-center justify-center text-white/30 text-xs italic">
               Action-space plots are not yet available.
             </div>
           )}

@@ -11,15 +11,15 @@ export default function EpisodePreview({ datasetData }: EpisodePreviewProps) {
   if (episodes.length === 0) {
     return (
       <div>
-        <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Episode Preview</h2>
-        <p className="text-[#8a8a8a] text-xs">No episodes available</p>
+        <h2 className="text-xs font-medium mb-3 text-white">Episode Preview</h2>
+        <p className="text-white/30 text-xs">No episodes available</p>
       </div>
     )
   }
 
   return (
     <div>
-      <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Episode Preview</h2>
+      <h2 className="text-xs font-medium mb-3 text-white">Episode Preview</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2">
         {episodes.map((episode, idx) => (
           <div
@@ -40,11 +40,11 @@ export default function EpisodePreview({ datasetData }: EpisodePreviewProps) {
                 </div>
               )}
             </div>
-            <div className="text-xs font-medium text-[#d4d4d4] mb-1">
+            <div className="text-xs font-medium text-white mb-1">
               {episode.id || `Episode ${idx + 1}`}
             </div>
             {episode.task_language_instruction && (
-              <div className="text-xs text-[#8a8a8a] line-clamp-2">
+              <div className="text-xs text-white/40 line-clamp-2">
                 {episode.task_language_instruction}
               </div>
             )}

@@ -50,36 +50,36 @@ export default function OptimizationPanel({ datasetName, onComplete }: Optimizat
   return (
     <div>
       <button
-          onClick={handleRun}
-          disabled={loading}
-          className="w-full px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
-          style={{ backgroundColor: '#4b6671' }}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Running optimization...
-            </>
-          ) : success ? (
-            <>
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Complete
-            </>
-          ) : (
-            <>
-              <Play className="w-3.5 h-3.5" />
-              Execute
-            </>
-          )}
-        </button>
-        {result && (
-          <div className="mt-3 p-2.5 bg-[#1a2a1a] border border-[#2a3a2a]">
-            <p className="text-xs text-[#88aa88] mb-1">
-              Optimization result:
-            </p>
-            <p className="text-xs text-[#88aa88] font-mono break-all">{result}</p>
-          </div>
+        onClick={handleRun}
+        disabled={loading}
+        className="w-full px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
+        style={{ backgroundColor: '#4b6671' }}
+      >
+        {loading ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Running optimization...
+          </>
+        ) : success ? (
+          <>
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Complete
+          </>
+        ) : (
+          <>
+            <Play className="w-3.5 h-3.5" />
+            Execute
+          </>
         )}
+      </button>
+      {result && (
+        <div className="mt-3 p-2.5 bg-[#1a2a1a] border border-[#2a3a2a]">
+          <p className="text-xs text-white/60 mb-1">
+            Optimization result:
+          </p>
+          <p className="text-xs text-white/50 font-mono break-all">{result}</p>
+        </div>
+      )}
     </div>
   )
 }

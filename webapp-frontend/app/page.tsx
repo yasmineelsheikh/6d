@@ -800,7 +800,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#1a1a1a] text-[#d4d4d4]">
+    <div className="min-h-screen bg-[#1a1a1a] text-white">
       {/* Side Menu */}
       <SideMenu
         isOpen={isSideMenuOpen}
@@ -860,7 +860,7 @@ export default function Home() {
           <div className="flex items-center h-full">
             <button
               onClick={() => setIsSideMenuOpen(!isSideMenuOpen)}
-              className="px-4 h-full text-[#d4d4d4] hover:text-white hover:bg-[#2a2a2a] transition-colors border-r border-[#2a2a2a]"
+              className="px-4 h-full text-white/40 hover:text-white hover:bg-[#2a2a2a] transition-colors border-r border-[#2a2a2a]"
               aria-label="Toggle menu"
             >
               <Menu className="w-4 h-4" />
@@ -903,19 +903,19 @@ export default function Home() {
           <div className="border-b border-[#2a2a2a] bg-[#1e1e1e]">
             <div className="max-w-7xl mx-auto px-6 py-3 flex items-center gap-8">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Tasks</span>
+                <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Tasks</span>
                 <span className="text-sm font-medium text-white">{fleetStats.total}</span>
               </div>
               <div className="h-3 w-px bg-[#2a2a2a]" />
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#c0a854]" />
-                <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Flagged</span>
+                <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Flagged</span>
                 <span className="text-sm font-medium text-[#c0a854]">{fleetStats.flagged}</span>
               </div>
               <div className="h-3 w-px bg-[#2a2a2a]" />
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#cc6666]" />
-                <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Needs Review</span>
+                <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Needs Review</span>
                 <span className="text-sm font-medium text-[#cc6666]">{fleetStats.pendingReviews}</span>
               </div>
             </div>
@@ -978,12 +978,12 @@ export default function Home() {
                           {avgSuccess}% avg
                         </span>
                       ) : (
-                        <span className="text-[11px] text-[#555] italic">No data</span>
+                        <span className="text-[11px] text-white/30 italic">No data</span>
                       )}
                     </div>
 
                     {/* Health indicators */}
-                    <div className="flex items-center gap-4 text-[11px] text-[#9aa4b5]">
+                    <div className="flex items-center gap-4 text-[11px] text-white/40">
                       <span>{totalEpisodes} samples</span>
                       <span className="text-[#2a2a2a]">·</span>
                       <span>{task.sessions.length} sessions</span>

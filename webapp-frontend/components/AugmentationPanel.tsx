@@ -93,20 +93,20 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
           onChange={(e) => setTaskDescription(e.target.value)}
           placeholder="Enter task description"
           rows={2}
-          className="w-full px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] resize-none transition-colors"
+          className="w-full px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-white placeholder:text-white/20 text-xs focus:outline-none focus:border-white/20 resize-none transition-colors"
         />
       </div>
 
       {/* Export Destination Section */}
       <div className="mb-3">
-        <label className="text-xs text-[#9aa4b5] mb-2 block">Export To (Optional)</label>
+        <label className="text-xs text-white/40 mb-2 block">Export To (Optional)</label>
         <div className="flex items-center gap-2 mb-3">
           <button
             type="button"
             onClick={() => setExportMode(exportMode === 'local' ? null : 'local')}
             className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors border ${exportMode === 'local'
               ? 'bg-[#4b6671] text-white border-[#4b6671]'
-              : 'bg-[#1a1a1a] text-[#9aa4b5] border-[#2a2a2a] hover:text-[#d4d4d4]'
+              : 'bg-[#1a1a1a] text-white/40 border-white/10 hover:text-white'
               }`}
           >
             <Folder className="w-3 h-3" />
@@ -117,7 +117,7 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
             onClick={() => setExportMode(exportMode === 's3' ? null : 's3')}
             className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors border ${exportMode === 's3'
               ? 'bg-[#4b6671] text-white border-[#4b6671]'
-              : 'bg-[#1a1a1a] text-[#9aa4b5] border-[#2a2a2a] hover:text-[#d4d4d4]'
+              : 'bg-[#1a1a1a] text-white/40 border-white/10 hover:text-white'
               }`}
           >
             <Cloud className="w-3 h-3" />
@@ -132,7 +132,7 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
               value={localPath}
               onChange={(e) => setLocalPath(e.target.value)}
               placeholder="/path/to/export/directory"
-              className="w-full px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+              className="w-full px-3 py-1.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs focus:outline-none focus:border-white/20 transition-colors"
             />
           </div>
         )}
@@ -145,14 +145,14 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
                 value={s3AccessKey}
                 onChange={(e) => setS3AccessKey(e.target.value)}
                 placeholder="Access Key"
-                className="px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                className="px-3 py-1.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs focus:outline-none focus:border-white/20 transition-colors"
               />
               <input
                 type="password"
                 value={s3SecretKey}
                 onChange={(e) => setS3SecretKey(e.target.value)}
                 placeholder="Secret Key"
-                className="px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                className="px-3 py-1.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs focus:outline-none focus:border-white/20 transition-colors"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -176,7 +176,7 @@ export default function AugmentationPanel({ datasetName, onComplete }: Augmentat
               value={s3Path}
               onChange={(e) => setS3Path(e.target.value)}
               placeholder="Path within bucket (e.g., augmented-videos/)"
-              className="w-full px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
+              className="w-full px-3 py-1.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs focus:outline-none focus:border-white/20 transition-colors"
             />
           </div>
         )}

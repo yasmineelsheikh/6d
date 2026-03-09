@@ -37,8 +37,8 @@ export default function HistoryTab() {
     return (
         <div className="space-y-4">
             <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Dataset Timeline</span>
-                <button className="text-[11px] text-[#555] hover:text-[#9aa4b5] transition-colors cursor-not-allowed" disabled>
+                <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Dataset Timeline</span>
+                <button className="text-[11px] text-white/30 hover:text-white/50 transition-colors cursor-not-allowed" disabled>
                     Compare Versions
                 </button>
             </div>
@@ -59,9 +59,9 @@ export default function HistoryTab() {
                                 <div className="flex-1 bg-white/5 border border-white/10 rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-1">
                                         <span className="text-xs text-white">{entry.description}</span>
-                                        <span className="text-[11px] text-[#555] font-mono">{entry.timestamp}</span>
+                                        <span className="text-[11px] text-white/30 font-mono">{entry.timestamp}</span>
                                     </div>
-                                    <div className="flex items-center gap-3 text-[11px] text-[#9aa4b5]">
+                                    <div className="flex items-center gap-3 text-[11px] text-white/40">
                                         {entry.samplesChanged && <span>{entry.samplesChanged}</span>}
                                         {entry.performanceDelta && (
                                             <span className={entry.performanceDelta.startsWith('+') ? 'text-[#5fa35f]' : 'text-[#cc6666]'}>

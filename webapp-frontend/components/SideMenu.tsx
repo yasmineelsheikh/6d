@@ -48,10 +48,10 @@ export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onL
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[#2a2a2a]">
-          <h2 className="text-sm font-medium text-[#d4d4d4]">6d labs</h2>
+          <h2 className="text-sm font-medium text-white">6d labs</h2>
           <button
             onClick={onToggle}
-            className="p-1 text-[#8a8a8a] hover:text-[#d4d4d4] transition-colors"
+            className="p-1 text-white/40 hover:text-white transition-colors"
             aria-label="Close menu"
           >
             <X className="w-4 h-4" />
@@ -75,7 +75,7 @@ export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onL
         {/* Tasks List */}
         <div className="flex-1 overflow-y-auto py-2">
           <div className="px-3 mb-2">
-            <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Tasks</span>
+            <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Tasks</span>
           </div>
           {tasks.length > 0 ? (
             <div className="space-y-0.5 px-2">
@@ -89,7 +89,7 @@ export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onL
                       "w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors rounded-lg text-left",
                       isActive
                         ? "bg-white/10 text-white"
-                        : "text-[#9aa4b5] hover:text-[#d4d4d4] hover:bg-white/5"
+                        : "text-white/40 hover:text-white hover:bg-white/5"
                     )}
                   >
                     <Database className="w-3.5 h-3.5 flex-shrink-0" />
@@ -100,7 +100,7 @@ export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onL
             </div>
           ) : (
             <div className="px-5 py-4">
-              <p className="text-[11px] text-[#555] italic">No tasks yet</p>
+              <p className="text-[11px] text-white/30 italic">No tasks yet</p>
             </div>
           )}
         </div>
@@ -112,7 +112,7 @@ export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onL
               onOpenSettings()
               onToggle()
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-[#9aa4b5] hover:text-[#d4d4d4] hover:bg-white/5 transition-colors rounded-lg"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-white/40 hover:text-white hover:bg-white/5 transition-colors rounded-lg"
           >
             <Settings className="w-3.5 h-3.5" />
             Settings
@@ -123,7 +123,7 @@ export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onL
               onOpenBilling()
               onToggle()
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-[#9aa4b5] hover:text-[#d4d4d4] hover:bg-white/5 transition-colors rounded-lg"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-white/40 hover:text-white hover:bg-white/5 transition-colors rounded-lg"
           >
             <CreditCard className="w-3.5 h-3.5" />
             Billing
@@ -134,7 +134,7 @@ export default function SideMenu({ onAddTask, onOpenSettings, onOpenBilling, onL
               onLogout()
               onToggle()
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-[#9aa4b5] hover:text-[#d4d4d4] hover:bg-white/5 transition-colors rounded-lg"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-white/40 hover:text-white hover:bg-white/5 transition-colors rounded-lg"
           >
             <LogOut className="w-3.5 h-3.5" />
             Logout

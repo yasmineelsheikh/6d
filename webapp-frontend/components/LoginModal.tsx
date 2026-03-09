@@ -38,10 +38,10 @@ export default function LoginModal({ isOpen, onClose, onSwitchToRegister }: Logi
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
       <div className="bg-[#222222] border border-[#2a2a2a] rounded-lg w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-medium text-[#d4d4d4]">Login</h2>
+          <h2 className="text-lg font-medium text-white">Login</h2>
           <button
             onClick={onClose}
-            className="text-[#8a8a8a] hover:text-[#d4d4d4]"
+            className="text-white/40 hover:text-white"
           >
             <X className="w-5 h-5" />
           </button>
@@ -55,24 +55,24 @@ export default function LoginModal({ isOpen, onClose, onSwitchToRegister }: Logi
           )}
 
           <div>
-            <label className="block text-xs text-[#d4d4d4] mb-1">Email</label>
+            <label className="block text-xs text-white mb-1">Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] text-xs focus:outline-none focus:border-[#3a3a3a]"
+              className="w-full px-3 py-2 bg-[#1a1a1a] border border-white/10 text-white text-xs focus:outline-none focus:border-white/20"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-[#d4d4d4] mb-1">Password</label>
+            <label className="block text-xs text-white mb-1">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] text-xs focus:outline-none focus:border-[#3a3a3a]"
+              className="w-full px-3 py-2 bg-[#1a1a1a] border border-white/10 text-white text-xs focus:outline-none focus:border-white/20"
             />
           </div>
 
@@ -88,7 +88,7 @@ export default function LoginModal({ isOpen, onClose, onSwitchToRegister }: Logi
         <div className="mt-4 text-center">
           <button
             onClick={onSwitchToRegister}
-            className="text-xs text-[#8a8a8a] hover:text-[#d4d4d4]"
+            className="text-xs text-white/40 hover:text-white"
           >
             Don't have an account? Register
           </button>

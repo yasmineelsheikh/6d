@@ -42,9 +42,9 @@ function AccordionPanel({ title, statusText, children }: {
                 onClick={() => setIsOpen(!isOpen)}
                 className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-white/[0.03] transition-colors"
             >
-                {isOpen ? <ChevronDown className="w-3.5 h-3.5 text-[#666] flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-[#666] flex-shrink-0" />}
+                {isOpen ? <ChevronDown className="w-3.5 h-3.5 text-white/40 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />}
                 <span className="text-xs font-medium text-white flex-1">{title}</span>
-                <span className="text-[11px] text-[#555]">{statusText}</span>
+                <span className="text-[11px] text-white/40">{statusText}</span>
             </button>
             {isOpen && (
                 <div className="px-6 pb-6 pt-4 border-t border-white/5">
@@ -55,7 +55,7 @@ function AccordionPanel({ title, statusText, children }: {
     )
 }
 
-const inputClass = "px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20 transition-colors"
+const inputClass = "px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/30 text-xs rounded-xl focus:outline-none focus:border-white/20 transition-colors"
 
 export default function ActionsTab(props: ActionsTabProps) {
     const [augMode, setAugMode] = useState<'automated' | 'manual'>('manual')
@@ -65,10 +65,10 @@ export default function ActionsTab(props: ActionsTabProps) {
             {/* Augmentation */}
             <AccordionPanel title="Augmentation" statusText="Ready">
                 <div className="mb-4 flex items-center gap-3">
-                    <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Mode</span>
+                    <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Mode</span>
                     <div className="inline-flex rounded-xl border border-white/10 text-[11px]">
-                        <button onClick={() => setAugMode('automated')} className={`px-4 py-1.5 rounded-l-xl transition-colors ${augMode === 'automated' ? 'bg-white/10 text-white' : 'text-[#9aa4b5]'}`}>Automated</button>
-                        <button onClick={() => setAugMode('manual')} className={`px-4 py-1.5 rounded-r-xl border-l border-white/10 transition-colors ${augMode === 'manual' ? 'bg-white/10 text-white' : 'text-[#9aa4b5]'}`}>Manual</button>
+                        <button onClick={() => setAugMode('automated')} className={`px-4 py-1.5 rounded-l-xl transition-colors ${augMode === 'automated' ? 'bg-white/10 text-white' : 'text-white/60'}`}>Automated</button>
+                        <button onClick={() => setAugMode('manual')} className={`px-4 py-1.5 rounded-r-xl border-l border-white/10 transition-colors ${augMode === 'manual' ? 'bg-white/10 text-white' : 'text-white/60'}`}>Manual</button>
                     </div>
                 </div>
                 <AugmentationPanel datasetName={props.datasetName} onComplete={props.onAugmentationComplete} />
@@ -88,7 +88,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                         {(['local', 's3', 'huggingface'] as const).map((mode) => (
                             <button key={mode} type="button"
                                 onClick={() => props.setUploadMode(mode)}
-                                className={`px-4 py-2 text-xs flex items-center gap-1.5 rounded-lg transition-colors ${props.uploadMode === mode ? 'bg-white/10 text-white' : 'text-[#9aa4b5] hover:text-[#d4d4d4]'}`}
+                                className={`px-4 py-2 text-xs flex items-center gap-1.5 rounded-lg transition-colors ${props.uploadMode === mode ? 'bg-white/10 text-white' : 'text-white/60 hover:text-white'}`}
                             >
                                 {mode === 'local' ? <Folder className="w-3 h-3" /> : <Cloud className="w-3 h-3" />}
                                 {mode === 'local' ? 'Local' : mode === 's3' ? 'S3' : 'HF'}
@@ -103,7 +103,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                                 multiple onChange={props.handleFolderSelect} className="hidden" />
                             <label htmlFor="folder-upload-actions"
                                 className={`w-full ${inputClass} cursor-pointer flex items-center gap-2 hover:bg-white/[0.03]`}>
-                                <Folder className="w-4 h-4 flex-shrink-0 text-[#9aa4b5]" />
+                                <Folder className="w-4 h-4 flex-shrink-0 text-white/40" />
                                 <span className="flex-1 truncate">{props.datasetPath || 'Select folder...'}</span>
                             </label>
                         </div>
@@ -140,8 +140,8 @@ export default function ActionsTab(props: ActionsTabProps) {
                 </div>
             </AccordionPanel>
 
-            {/* Scenario Explorer */}
-            <AccordionPanel title="Scenario Explorer" statusText={`${props.datasetData.length} episodes`}>
+            {/* Data Explorer */}
+            <AccordionPanel title="Data Explorer" statusText={`${props.datasetData.length} episodes`}>
                 <EpisodePreview datasetData={props.datasetData} />
             </AccordionPanel>
         </div>

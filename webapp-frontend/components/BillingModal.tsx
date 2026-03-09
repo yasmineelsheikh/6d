@@ -14,7 +14,7 @@ interface BillingModalProps {
 }
 
 // Payment form component that uses Stripe Elements
-function PaymentForm({ creditsToPurchase, onSuccess, onError }: { 
+function PaymentForm({ creditsToPurchase, onSuccess, onError }: {
   creditsToPurchase: number
   onSuccess: (credits: string) => void
   onError: (error: string) => void
@@ -113,7 +113,7 @@ function PaymentForm({ creditsToPurchase, onSuccess, onError }: {
                 fontSize: '14px',
                 color: '#d4d4d4',
                 '::placeholder': {
-                  color: '#666666',
+                  color: 'rgba(255,255,255,0.2)',
                 },
               },
               invalid: {
@@ -203,7 +203,7 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
     setSuccess(`Successfully purchased ${creditsToPurchase} credits for $${cost}`)
     setPurchaseAmount('100')
     setShowPaymentForm(false)
-    
+
     // Update user in context
     if (user) {
       user.credits = newCredits
@@ -227,10 +227,10 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
       <div className="bg-[#222222] border border-[#2a2a2a] rounded-lg w-full max-w-md">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-[#2a2a2a]">
-          <h2 className="text-lg font-semibold text-[#d4d4d4]">Billing & Credits</h2>
+          <h2 className="text-lg font-semibold text-white">Billing & Credits</h2>
           <button
             onClick={onClose}
-            className="p-1 text-[#8a8a8a] hover:text-[#d4d4d4] transition-colors"
+            className="p-1 text-white/40 hover:text-white transition-colors"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -241,8 +241,8 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
         <div className="p-6 space-y-6">
           {/* Current Credits */}
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 rounded">
-            <div className="text-xs text-[#8a8a8a] mb-1">Current Credits</div>
-            <div className="text-2xl font-semibold text-[#d4d4d4]">{creditsNum.toLocaleString()}</div>
+            <div className="text-xs text-white/40 mb-1">Current Credits</div>
+            <div className="text-2xl font-semibold text-white">{creditsNum.toLocaleString()}</div>
           </div>
 
           {/* Purchase Credits */}
@@ -250,7 +250,7 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
             {!showPaymentForm ? (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-[#d4d4d4] mb-2">
+                  <label className="block text-sm font-medium text-white mb-2">
                     Purchase Credits
                   </label>
                   <div className="flex gap-2">
@@ -259,7 +259,7 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
                       min="1"
                       value={purchaseAmount}
                       onChange={(e) => setPurchaseAmount(e.target.value)}
-                      className="flex-1 px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-sm focus:outline-none focus:border-[#3a3a3a] transition-colors"
+                      className="flex-1 px-3 py-2 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-sm focus:outline-none focus:border-white/20 transition-colors"
                       placeholder="Number of credits"
                     />
                     <button
@@ -270,7 +270,7 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
                     </button>
                   </div>
                   {purchaseCreditsNum > 0 && (
-                    <div className="mt-2 text-xs text-[#8a8a8a]">
+                    <div className="mt-2 text-xs text-white/40">
                       Cost: ${totalCost}
                     </div>
                   )}
@@ -279,7 +279,7 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
             ) : (
               <>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-[#d4d4d4]">
+                  <span className="text-sm text-white">
                     Purchasing {purchaseCreditsNum} credits for ${totalCost}
                   </span>
                   <button
@@ -287,7 +287,7 @@ export default function BillingModal({ isOpen, onClose }: BillingModalProps) {
                       setShowPaymentForm(false)
                       setError(null)
                     }}
-                    className="text-xs text-[#8a8a8a] hover:text-[#d4d4d4]"
+                    className="text-xs text-white/40 hover:text-white"
                   >
                     Cancel
                   </button>

@@ -50,10 +50,10 @@ export default function OverviewTab(props: OverviewTabProps) {
             <div className="space-y-6">
                 <div className="flex flex-col items-center justify-center py-16">
                     <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/10 flex items-center justify-center mb-5">
-                        <Upload className="w-7 h-7 text-[#9aa4b5]" />
+                        <Upload className="w-7 h-7 text-white/60" />
                     </div>
                     <h3 className="text-base font-medium text-white mb-1.5">No dataset uploaded yet</h3>
-                    <p className="text-[13px] text-[#9aa4b5] mb-8 text-center max-w-sm">Upload your data to start seeing distributions, episode previews, and run augmentations.</p>
+                    <p className="text-[13px] text-white/50 mb-8 text-center max-w-sm">Upload your data to start seeing distributions, episode previews, and run augmentations.</p>
 
                     {/* Upload form */}
                     <div className="w-full max-w-lg space-y-4">
@@ -62,7 +62,7 @@ export default function OverviewTab(props: OverviewTabProps) {
                             {(['local', 's3', 'huggingface'] as const).map((m) => (
                                 <button key={m} type="button"
                                     onClick={() => props.setUploadMode?.(m)}
-                                    className={`px-4 py-2 text-xs flex items-center gap-1.5 rounded-lg transition-colors ${mode === m ? 'bg-white/10 text-white' : 'text-[#9aa4b5] hover:text-[#d4d4d4]'}`}
+                                    className={`px-4 py-2 text-xs flex items-center gap-1.5 rounded-lg transition-colors ${mode === m ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
                                 >
                                     {m === 'local' ? <Folder className="w-3 h-3" /> : <Cloud className="w-3 h-3" />}
                                     {m === 'local' ? 'Local' : m === 's3' ? 'S3' : 'Hugging Face'}
@@ -77,8 +77,8 @@ export default function OverviewTab(props: OverviewTabProps) {
                                     {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
                                     multiple onChange={props.handleFolderSelect} className="hidden" />
                                 <label htmlFor="folder-upload-overview"
-                                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-dashed border-white/15 text-[#d4d4d4] text-xs cursor-pointer flex items-center gap-3 hover:bg-white/[0.03] hover:border-white/20 transition-all rounded-xl">
-                                    <Folder className="w-4 h-4 flex-shrink-0 text-[#9aa4b5]" />
+                                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-dashed border-white/15 text-white text-xs cursor-pointer flex items-center gap-3 hover:bg-white/[0.03] hover:border-white/20 transition-all rounded-xl">
+                                    <Folder className="w-4 h-4 flex-shrink-0 text-white/40" />
                                     <span className="flex-1 truncate">{props.datasetPath || 'Select folder to upload...'}</span>
                                 </label>
                             </div>
@@ -88,24 +88,24 @@ export default function OverviewTab(props: OverviewTabProps) {
                         {mode === 's3' && (
                             <div className="flex flex-col gap-2">
                                 <div className="grid grid-cols-2 gap-2">
-                                    <input type="text" placeholder="Access Key" value={props.s3AccessKey || ''} onChange={e => props.setS3AccessKey?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
-                                    <input type="password" placeholder="Secret Key" value={props.s3SecretKey || ''} onChange={e => props.setS3SecretKey?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                    <input type="text" placeholder="Access Key" value={props.s3AccessKey || ''} onChange={e => props.setS3AccessKey?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                    <input type="password" placeholder="Secret Key" value={props.s3SecretKey || ''} onChange={e => props.setS3SecretKey?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
                                 </div>
                                 <div className="grid grid-cols-2 gap-2">
-                                    <input type="text" placeholder="Bucket" value={props.s3Bucket || ''} onChange={e => props.setS3Bucket?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
-                                    <input type="text" placeholder="Region" value={props.s3Region || ''} onChange={e => props.setS3Region?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                    <input type="text" placeholder="Bucket" value={props.s3Bucket || ''} onChange={e => props.setS3Bucket?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                    <input type="text" placeholder="Region" value={props.s3Region || ''} onChange={e => props.setS3Region?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
                                 </div>
-                                <input type="text" placeholder="Path within bucket" value={props.s3UserPath || ''} onChange={e => { props.setS3UserPath?.(e.target.value); props.setDatasetPath?.(e.target.value) }} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                <input type="text" placeholder="Path within bucket" value={props.s3UserPath || ''} onChange={e => { props.setS3UserPath?.(e.target.value); props.setDatasetPath?.(e.target.value) }} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
                             </div>
                         )}
 
                         {/* Hugging Face */}
                         {mode === 'huggingface' && (
                             <div className="flex flex-col gap-2">
-                                <input type="text" placeholder="Repository ID (e.g. org/dataset)" value={props.hfRepoId || ''} onChange={e => { props.setHfRepoId?.(e.target.value); props.setDatasetPath?.(e.target.value) }} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                <input type="text" placeholder="Repository ID (e.g. org/dataset)" value={props.hfRepoId || ''} onChange={e => { props.setHfRepoId?.(e.target.value); props.setDatasetPath?.(e.target.value) }} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
                                 <div className="grid grid-cols-2 gap-2">
-                                    <input type="text" placeholder="Split (default: train)" value={props.hfSplit || ''} onChange={e => props.setHfSplit?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
-                                    <input type="password" placeholder="HF Token (optional)" value={props.hfToken || ''} onChange={e => props.setHfToken?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-[#d4d4d4] placeholder:text-[#555] text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                    <input type="text" placeholder="Split (default: train)" value={props.hfSplit || ''} onChange={e => props.setHfSplit?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
+                                    <input type="password" placeholder="HF Token (optional)" value={props.hfToken || ''} onChange={e => props.setHfToken?.(e.target.value)} className="px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 text-xs rounded-xl focus:outline-none focus:border-white/20" />
                                 </div>
                             </div>
                         )}
@@ -129,12 +129,12 @@ export default function OverviewTab(props: OverviewTabProps) {
                     <button
                         type="button"
                         onClick={() => analysisSwitchEnabled && setAnalysisView('original')}
-                        className={`px-3 py-1.5 rounded-l-lg transition-colors ${analysisView === 'original' ? 'bg-white/10 text-white' : 'text-[#9aa4b5]'}`}
+                        className={`px-3 py-1.5 rounded-l-lg transition-colors ${analysisView === 'original' ? 'bg-white/10 text-white' : 'text-white/40'}`}
                     >Original</button>
                     <button
                         type="button"
                         onClick={() => analysisSwitchEnabled && setAnalysisView('new')}
-                        className={`px-3 py-1.5 rounded-r-lg border-l border-white/10 transition-colors ${analysisView === 'new' ? 'bg-white/10 text-white' : 'text-[#9aa4b5]'}`}
+                        className={`px-3 py-1.5 rounded-r-lg border-l border-white/10 transition-colors ${analysisView === 'new' ? 'bg-white/10 text-white' : 'text-white/40'}`}
                     >New</button>
                 </div>
             </div>
@@ -143,7 +143,7 @@ export default function OverviewTab(props: OverviewTabProps) {
 
             {analysisView === 'new' && !variationsIncluded && !distributionsLoading && (
                 <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                    <p className="text-[#9aa4b5] text-xs">Run augmentation to see updated distributions.</p>
+                    <p className="text-white text-xs">Run augmentation to see updated distributions.</p>
                 </div>
             )}
 

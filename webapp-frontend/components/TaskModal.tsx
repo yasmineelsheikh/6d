@@ -59,10 +59,10 @@ export default function TaskModal({ isOpen, onClose, onSave }: TaskModalProps) {
       <div className="bg-[#222222] border border-[#2a2a2a] w-full max-w-md">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[#2a2a2a]">
-          <h2 className="text-sm font-medium text-[#d4d4d4]">Add New Task</h2>
+          <h2 className="text-sm font-medium text-white">Add New Task</h2>
           <button
             onClick={onClose}
-            className="p-1 text-[#8a8a8a] hover:text-[#d4d4d4] transition-colors"
+            className="p-1 text-white/40 hover:text-white transition-colors"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -78,7 +78,7 @@ export default function TaskModal({ isOpen, onClose, onSave }: TaskModalProps) {
           )}
 
           <div>
-            <label className="block text-xs font-medium text-[#d4d4d4] mb-1.5">
+            <label className="block text-xs font-medium text-white mb-1.5">
               Task Name *
             </label>
             <input
@@ -86,58 +86,58 @@ export default function TaskModal({ isOpen, onClose, onSave }: TaskModalProps) {
               required
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] focus:outline-none focus:border-[#4b6671]"
+              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:border-white/20"
               placeholder="Enter task name"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#d4d4d4] mb-1.5">
+            <label className="block text-xs font-medium text-white mb-1.5">
               Description
             </label>
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               rows={3}
-              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] focus:outline-none focus:border-[#4b6671] resize-none"
+              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:border-white/20 resize-none"
               placeholder="Enter task description"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#d4d4d4] mb-1.5">
+            <label className="block text-xs font-medium text-white mb-1.5">
               Dataset Path
             </label>
             <input
               type="text"
               value={formData.dataset_path}
               onChange={(e) => setFormData({ ...formData, dataset_path: e.target.value })}
-              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] focus:outline-none focus:border-[#4b6671]"
+              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:border-white/20"
               placeholder="path/to/dataset"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#d4d4d4] mb-1.5">
+            <label className="block text-xs font-medium text-white mb-1.5">
               Prompt
             </label>
             <textarea
               value={formData.prompt}
               onChange={(e) => setFormData({ ...formData, prompt: e.target.value })}
               rows={3}
-              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] focus:outline-none focus:border-[#4b6671] resize-none"
+              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:border-white/20 resize-none"
               placeholder="Enter prompt text"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#d4d4d4] mb-1.5">
+            <label className="block text-xs font-medium text-white mb-1.5">
               Priority
             </label>
             <select
               value={formData.priority}
               onChange={(e) => setFormData({ ...formData, priority: e.target.value as 'low' | 'medium' | 'high' })}
-              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] focus:outline-none focus:border-[#4b6671]"
+              className="w-full px-3 py-2 text-xs bg-[#1a1a1a] border border-white/10 text-white focus:outline-none focus:border-white/20"
             >
               <option value="low">Low</option>
               <option value="medium">Medium</option>
@@ -150,7 +150,7 @@ export default function TaskModal({ isOpen, onClose, onSave }: TaskModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 text-xs bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] hover:bg-[#2a2a2a] transition-colors"
+              className="flex-1 px-4 py-2 text-xs bg-[#1a1a1a] border border-white/10 text-white/40 hover:bg-white/5 transition-colors"
             >
               Cancel
             </button>
