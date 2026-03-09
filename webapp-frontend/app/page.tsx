@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight, Folder, Cloud } from 'lucide-react'
+import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight, Folder, Cloud, Plus, Bell, ArrowRight, TrendingUp, AlertCircle } from 'lucide-react'
 import DatasetOverview from '@/components/DatasetOverview'
 import DatasetDistributions from '@/components/DatasetDistributions'
 import EpisodePreview from '@/components/EpisodePreview'
@@ -33,6 +33,102 @@ interface DatasetInfo {
 interface Visualization {
   title: string
   figure: any
+}
+
+interface EvaluationSession {
+  id: string
+  datasetName: string
+  uploadedAt: string
+  episodeCount: number
+  successRate: number
+}
+
+interface EvaluationTask {
+  id: string
+  name: string
+  sessions: EvaluationSession[]
+  isExpanded: boolean
+}
+
+const SEED_TASKS: EvaluationTask[] = [
+  {
+    id: 'task-1',
+    name: 'Stack Cups',
+    isExpanded: false,
+    sessions: [
+      { id: 's1', datasetName: 'stack_cups_v1', uploadedAt: '2026-01-15', episodeCount: 80, successRate: 88 },
+      { id: 's2', datasetName: 'stack_cups_v2', uploadedAt: '2026-02-03', episodeCount: 120, successRate: 87 },
+    ],
+  },
+  {
+    id: 'task-2',
+    name: 'Fold Laundry',
+    isExpanded: false,
+    sessions: [
+      { id: 's3', datasetName: 'laundry_indoor_jan', uploadedAt: '2026-01-20', episodeCount: 45, successRate: 72 },
+    ],
+  },
+  {
+    id: 'task-3',
+    name: 'Open Door',
+    isExpanded: false,
+    sessions: [
+      { id: 's4', datasetName: 'door_handle_dataset', uploadedAt: '2026-01-28', episodeCount: 60, successRate: 91 },
+    ],
+  },
+  {
+    id: 'task-4',
+    name: 'Pour Liquid',
+    isExpanded: false,
+    sessions: [],
+  },
+  {
+    id: 'task-5',
+    name: 'Pick and Place',
+    isExpanded: false,
+    sessions: [
+      { id: 's5', datasetName: 'pick_place_objects', uploadedAt: '2026-02-10', episodeCount: 95, successRate: 83 },
+    ],
+  },
+]
+
+// ── Sparkline Component ──
+function Sparkline({ values, width = 80, height = 28 }: { values: number[]; width?: number; height?: number }) {
+  if (values.length < 2) return null
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const points = values
+    .map((v, i) => {
+      const x = (i / (values.length - 1)) * width
+      const y = height - ((v - min) / range) * (height - 4) - 2
+      return `${x},${y}`
+    })
+    .join(' ')
+
+  const lastValue = values[values.length - 1]
+  const prevValue = values[values.length - 2]
+  const color = lastValue >= prevValue ? '#5fa35f' : '#cc6666'
+
+  return (
+    <svg width={width} height={height} className="flex-shrink-0">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+// ── Status dot helper ──
+function StatusDot({ rate }: { rate: number | null }) {
+  if (rate === null) return <span className="w-2 h-2 rounded-full bg-[#555] flex-shrink-0" />
+  const color = rate >= 85 ? 'bg-[#5fa35f]' : rate >= 70 ? 'bg-[#c0a854]' : 'bg-[#cc6666]'
+  return <span className={`w-2 h-2 rounded-full ${color} flex-shrink-0`} />
 }
 
 export default function Home() {
@@ -111,9 +207,14 @@ export default function Home() {
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false)
   const [tasks, setTasks] = useState<TaskData[]>([])
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState<'Preparation' | 'Evaluation'>('Preparation')
-  const [showEvaluationInsights, setShowEvaluationInsights] = useState(false)
+  // Evaluation tab state
+  const [evaluationTasks, setEvaluationTasks] = useState<EvaluationTask[]>(SEED_TASKS)
+  const [isUploadSectionExpanded, setIsUploadSectionExpanded] = useState(true)
+  const [evalSelectedTask, setEvalSelectedTask] = useState<string>('Stack Cups')
+  const [evalNewTaskName, setEvalNewTaskName] = useState('')
+
+  // Action queue collapsed state
+  const [isActionQueueExpanded, setIsActionQueueExpanded] = useState(true)
 
   // Debug: verify API base URL at runtime
   useEffect(() => {
@@ -125,6 +226,10 @@ export default function Home() {
     if (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) return
     if (uploadMode === 'huggingface' && !hfRepoId) return
 
+    // Determine task name
+    const taskName = evalSelectedTask === '__new__' ? evalNewTaskName.trim() : evalSelectedTask
+    if (!taskName) return
+
     // Auto-generate dataset name if not set
     let finalDatasetName = datasetName
     if (!finalDatasetName) {
@@ -134,11 +239,11 @@ export default function Home() {
         finalDatasetName = relativePath.split('/')[0]
       } else if (uploadMode === 's3' && s3UserPath) {
         const pathParts = s3UserPath.split('/').filter(p => p)
-        finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+        finalDatasetName = pathParts[pathParts.length - 1] || 'dataset'
       } else if (uploadMode === 'huggingface' && hfRepoId) {
         finalDatasetName = hfRepoId.split('/').pop() || 'dataset'
       } else {
-        return // Cannot proceed without a dataset name
+        return
       }
       setDatasetName(finalDatasetName)
     }
@@ -147,11 +252,43 @@ export default function Home() {
     setUploadSuccess(false)
     setError(null)
 
-    // Simulate upload for placeholder
+    // Simulate upload processing
     setTimeout(() => {
+      const newSession: EvaluationSession = {
+        id: `s-${Date.now()}`,
+        datasetName: finalDatasetName,
+        uploadedAt: new Date().toISOString().split('T')[0],
+        episodeCount: Math.floor(Math.random() * 80) + 40,
+        successRate: Math.floor(Math.random() * 25) + 70,
+      }
+
+      setEvaluationTasks(prev => {
+        const existing = prev.find(t => t.name === taskName)
+        if (existing) {
+          // Update existing task — append session and auto-expand
+          return prev.map(t =>
+            t.name === taskName
+              ? { ...t, sessions: [...t.sessions, newSession], isExpanded: true }
+              : { ...t, isExpanded: false }
+          )
+        } else {
+          // Create new task
+          return [
+            ...prev.map(t => ({ ...t, isExpanded: false })),
+            {
+              id: `task-${Date.now()}`,
+              name: taskName,
+              sessions: [newSession],
+              isExpanded: true,
+            },
+          ]
+        }
+      })
+
       setUploadLoading(false)
       setUploadSuccess(true)
-      setShowEvaluationInsights(true)
+      setIsUploadSectionExpanded(false)
+      setEvalNewTaskName('')
     }, 1500)
   }
 
@@ -600,6 +737,57 @@ export default function Home() {
     }
   }, [authLoading, isAuthenticated])
 
+  // ── Derived dashboard data ──
+  const sortedTasks = useMemo(() => {
+    return [...evaluationTasks].sort((a, b) => {
+      // Flagged tasks first (no sessions, or declining rate)
+      const aFlagged = a.sessions.length === 0 || (a.sessions.length >= 2 && a.sessions[a.sessions.length - 1].successRate < a.sessions[a.sessions.length - 2].successRate)
+      const bFlagged = b.sessions.length === 0 || (b.sessions.length >= 2 && b.sessions[b.sessions.length - 1].successRate < b.sessions[b.sessions.length - 2].successRate)
+      if (aFlagged && !bFlagged) return -1
+      if (!aFlagged && bFlagged) return 1
+      // Then by most recent uploadedAt
+      const aLatest = a.sessions.length > 0 ? a.sessions[a.sessions.length - 1].uploadedAt : ''
+      const bLatest = b.sessions.length > 0 ? b.sessions[b.sessions.length - 1].uploadedAt : ''
+      return bLatest.localeCompare(aLatest)
+    })
+  }, [evaluationTasks])
+
+  const fleetStats = useMemo(() => {
+    const total = evaluationTasks.length
+    const flagged = evaluationTasks.filter(t => {
+      if (t.sessions.length === 0) return true
+      if (t.sessions.length >= 2) {
+        const last = t.sessions[t.sessions.length - 1].successRate
+        const prev = t.sessions[t.sessions.length - 2].successRate
+        return last < prev
+      }
+      return false
+    }).length
+    const pendingReviews = evaluationTasks.filter(t => t.sessions.length > 0 && t.sessions.some(s => s.successRate < 80)).length
+    return { total, flagged, pendingReviews }
+  }, [evaluationTasks])
+
+  const recommendations = useMemo(() => {
+    const recs: Array<{ taskName: string; message: string }> = []
+    evaluationTasks.forEach(t => {
+      if (t.sessions.length === 0) {
+        recs.push({ taskName: t.name, message: 'No data yet — upload initial dataset' })
+      } else {
+        const lastSession = t.sessions[t.sessions.length - 1]
+        if (lastSession.successRate < 80) {
+          recs.push({ taskName: t.name, message: `Success rate at ${lastSession.successRate}% — consider augmentation` })
+        }
+        if (t.sessions.length >= 2) {
+          const prev = t.sessions[t.sessions.length - 2].successRate
+          if (lastSession.successRate < prev) {
+            recs.push({ taskName: t.name, message: `Performance declined from ${prev}% to ${lastSession.successRate}%` })
+          }
+        }
+      }
+    })
+    return recs
+  }, [evaluationTasks])
+
   // Show loading screen while checking auth
   if (authLoading) {
     return (
@@ -665,6 +853,7 @@ export default function Home() {
           setIsRegisterModalOpen(false)
           router.push('/')
         }}
+        tasks={evaluationTasks.map(t => ({ name: t.name }))}
       />
 
       {/* Task Modal */}
@@ -699,42 +888,19 @@ export default function Home() {
               <Menu className="w-4 h-4" />
             </button>
             <div className="flex items-center gap-4 px-6 flex-1">
-              <h1 className="text-sm font-medium tracking-wide text-white mr-8">
+              <h1 className="text-sm font-medium tracking-wide text-white">
                 6d labs
               </h1>
-              <div className="flex items-center gap-6 h-full">
-                <button
-                  onClick={() => setActiveTab('Preparation')}
-                  className={cn(
-                    "h-full text-xs font-medium border-b-2 transition-colors px-1",
-                    activeTab === 'Preparation'
-                      ? "border-[#4b6671] text-white"
-                      : "border-transparent text-[#9aa4b5] hover:text-[#d4d4d4]"
-                  )}
-                >
-                  Preparation
-                </button>
-                <button
-                  onClick={() => setActiveTab('Evaluation')}
-                  className={cn(
-                    "h-full text-xs font-medium border-b-2 transition-colors px-1",
-                    activeTab === 'Evaluation'
-                      ? "border-[#4b6671] text-white"
-                      : "border-transparent text-[#9aa4b5] hover:text-[#d4d4d4]"
-                  )}
-                >
-                  Evaluation
-                </button>
-              </div>
-              {currentDataset && (
-                <>
-                  <div className="h-3 w-px bg-[#2a2a2a]" />
-                  <span className="text-xs text-[#b5becb] font-mono">
-                    {currentDataset}
-                  </span>
-                </>
-              )}
             </div>
+          </div>
+          <div className="px-4">
+            <button
+              onClick={() => setIsTaskModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#4b6671] hover:bg-[#3d5560] transition-colors rounded-lg"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Task
+            </button>
           </div>
         </div>
       </header>
@@ -754,676 +920,173 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        <main className="max-w-7xl mx-auto px-6 py-8">
-          {activeTab === 'Preparation' && (
-            <>
-              {/* Upload Data Section */}
-              <div className="mb-8">
-                <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Upload Data</h2>
-                <div className="bg-[#222222] border border-[#2a2a2a] p-6">
-                  <div className="flex items-start gap-4 mb-4">
-                    {/* Input boxes */}
-                    <div className="flex-1 flex items-center gap-4">
-                      {/* Upload Mode Toggle */}
-                      <div className="flex items-center gap-2 border border-[#2a2a2a] rounded p-1 bg-[#1a1a1a]">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUploadMode('local')
-                            setUploadedFiles(null)
-                            setDatasetPath('')
-                          }}
-                          className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'local'
-                            ? 'bg-[#4b6671] text-white'
-                            : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                            }`}
-                        >
-                          <Folder className="w-3 h-3" />
-                          Local
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUploadMode('s3')
-                            setUploadedFiles(null)
-                            setDatasetPath('')
-                          }}
-                          className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 's3'
-                            ? 'bg-[#4b6671] text-white'
-                            : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                            }`}
-                        >
-                          <Cloud className="w-3 h-3" />
-                          S3
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUploadMode('huggingface')
-                            setUploadedFiles(null)
-                            setDatasetPath('')
-                          }}
-                          className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'huggingface'
-                            ? 'bg-[#4b6671] text-white'
-                            : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                            }`}
-                        >
-                          <Cloud className="w-3 h-3" />
-                          HF
-                        </button>
-                      </div>
+        <>
+          {/* Fleet Health Bar */}
+          <div className="border-b border-[#2a2a2a] bg-[#1e1e1e]">
+            <div className="max-w-7xl mx-auto px-6 py-3 flex items-center gap-8">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Tasks</span>
+                <span className="text-sm font-medium text-white">{fleetStats.total}</span>
+              </div>
+              <div className="h-3 w-px bg-[#2a2a2a]" />
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#c0a854]" />
+                <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Flagged</span>
+                <span className="text-sm font-medium text-[#c0a854]">{fleetStats.flagged}</span>
+              </div>
+              <div className="h-3 w-px bg-[#2a2a2a]" />
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#cc6666]" />
+                <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Needs Review</span>
+                <span className="text-sm font-medium text-[#cc6666]">{fleetStats.pendingReviews}</span>
+              </div>
+            </div>
+          </div>
 
-                      {/* Local Upload */}
-                      {uploadMode === 'local' && (
-                        <div className="relative w-[576px]">
-                          <input
-                            type="file"
-                            id="folder-upload"
-                            {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-                            multiple
-                            onChange={handleFolderSelect}
-                            className="hidden"
-                          />
-                          <label
-                            htmlFor="folder-upload"
-                            className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors cursor-pointer flex items-center gap-2 hover:bg-[#252525]"
-                          >
-                            <Folder className="w-4 h-4 flex-shrink-0" />
-                            <span className="flex-1 truncate">
-                              {datasetPath || 'Select folder...'}
+          <main className="max-w-7xl mx-auto px-6 py-8">
+            <div className="flex gap-8">
+              {/* Task Cards Grid */}
+              <div className="flex-1">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {sortedTasks.map(task => {
+                    const totalEpisodes = task.sessions.reduce((sum, s) => sum + s.episodeCount, 0)
+                    const avgSuccess = task.sessions.length > 0
+                      ? Math.round(task.sessions.reduce((sum, s) => sum + s.successRate, 0) / task.sessions.length)
+                      : null
+                    const successRates = task.sessions.map(s => s.successRate)
+                    const lastUpdated = task.sessions.length > 0
+                      ? task.sessions[task.sessions.length - 1].uploadedAt
+                      : null
+                    const isFlagged = task.sessions.length === 0 ||
+                      (task.sessions.length >= 2 && task.sessions[task.sessions.length - 1].successRate < task.sessions[task.sessions.length - 2].successRate)
+
+                    return (
+                      <button
+                        key={task.id}
+                        onClick={() => router.push(`/dataset/${encodeURIComponent(task.name)}`)}
+                        className="bg-white/5 border border-white/10 rounded-xl p-5 text-left hover:bg-white/[0.07] hover:border-white/[0.15] transition-all group"
+                      >
+                        {/* Card header */}
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center gap-2.5">
+                            <StatusDot rate={avgSuccess} />
+                            <h3 className="text-sm font-medium text-white group-hover:text-white/90">{task.name}</h3>
+                          </div>
+                          {isFlagged && (
+                            <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-[#c0a854] bg-[#c0a854]/10 rounded-full">
+                              <AlertCircle className="w-2.5 h-2.5" />
+                              Attention
                             </span>
-                            {uploadedFiles && (
-                              <span className="text-[#9aa4b5] text-[10px]">
-                                ({uploadedFiles.length} files)
-                              </span>
-                            )}
-                          </label>
-                        </div>
-                      )}
-
-                      {/* S3 Credentials */}
-                      {uploadMode === 's3' && (
-                        <div className="flex flex-col gap-2 w-[576px]">
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              placeholder="Access Key"
-                              value={s3AccessKey}
-                              onChange={(e) => setS3AccessKey(e.target.value)}
-                              autoComplete="off"
-                              data-form-type="other"
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                            <input
-                              type="password"
-                              placeholder="Secret Key"
-                              value={s3SecretKey}
-                              onChange={(e) => setS3SecretKey(e.target.value)}
-                              autoComplete="new-password"
-                              data-form-type="other"
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              placeholder="Bucket Name"
-                              value={s3Bucket}
-                              onChange={(e) => setS3Bucket(e.target.value)}
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                            <input
-                              type="text"
-                              placeholder="Region (e.g., us-east-1)"
-                              value={s3Region}
-                              onChange={(e) => setS3Region(e.target.value)}
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                          </div>
-                          <input
-                            type="text"
-                            placeholder="Path within bucket (e.g., datasets/my-dataset/)"
-                            value={s3UserPath}
-                            onChange={(e) => {
-                              const path = e.target.value
-                              setS3UserPath(path)
-                              setDatasetPath(path)
-                              // Auto-generate dataset name from path
-                              if (path) {
-                                const pathParts = path.split('/').filter(p => p)
-                                const datasetNameFromPath = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
-                                setDatasetName(datasetNameFromPath)
-                              } else {
-                                setDatasetName('')
-                              }
-                            }}
-                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                          />
-                        </div>
-                      )}
-
-                      {/* Hugging Face Input */}
-                      {uploadMode === 'huggingface' && (
-                        <div className="flex flex-col gap-2 w-[576px]">
-                          <input
-                            type="text"
-                            placeholder="Repository ID (e.g., username/dataset-name)"
-                            value={hfRepoId}
-                            onChange={(e) => {
-                              const repoId = e.target.value
-                              setHfRepoId(repoId)
-                              setDatasetPath(repoId)
-                              // Auto-generate dataset name from repo ID
-                              if (repoId) {
-                                const datasetNameFromRepo = repoId.split('/').pop() || 'dataset'
-                                setDatasetName(datasetNameFromRepo)
-                              } else {
-                                setDatasetName('')
-                              }
-                            }}
-                            className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                          />
-                          <div className="grid grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              placeholder="Split (default: train)"
-                              value={hfSplit}
-                              onChange={(e) => setHfSplit(e.target.value)}
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                            <input
-                              type="password"
-                              placeholder="HF Token (optional, for private datasets)"
-                              value={hfToken}
-                              onChange={(e) => setHfToken(e.target.value)}
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Settings on far right in fixed-width column */}
-                    <div className="flex items-center gap-3 flex-shrink-0 w-72 justify-end relative">
-                      {/* Environment Selection - Checkboxes */}
-                      <div className="flex items-center gap-3">
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={isIndoor}
-                            onChange={(e) => {
-                              setIsIndoor(e.target.checked)
-                              if (e.target.checked) {
-                                setIsOutdoor(false)
-                              }
-                            }}
-                            className="w-3 h-3 accent-[#4b6671] cursor-pointer"
-                          />
-                          <span className="text-xs text-[#d4d4d4]">Indoor</span>
-                        </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={isOutdoor}
-                            onChange={(e) => {
-                              setIsOutdoor(e.target.checked)
-                              if (e.target.checked) {
-                                setIsIndoor(false)
-                              }
-                            }}
-                            className="w-3 h-3 accent-[#4b6671] cursor-pointer"
-                          />
-                          <span className="text-xs text-[#d4d4d4]">Outdoor</span>
-                        </label>
-                      </div>
-
-                      {/* Advanced Axes Toggle - inline with Indoor/Outdoor */}
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => setShowAdvancedAxes(!showAdvancedAxes)}
-                          className="flex items-center gap-1 text-xs text-[#8a8a8a] hover:text-[#d4d4d4] transition-colors"
-                        >
-                          {showAdvancedAxes ? (
-                            <ChevronDown className="w-3 h-3" />
-                          ) : (
-                            <ChevronRight className="w-3 h-3" />
                           )}
-                          <span>Axes</span>
-                        </button>
+                        </div>
 
-                        {/* Axes dropdown - absolutely positioned so it doesn't affect layout */}
-                        {showAdvancedAxes && (isIndoor || isOutdoor) && (
-                          <div className="absolute top-full right-0 mt-1 z-50 bg-[#222222] rounded px-2 py-2">
-                            <div className="flex items-center gap-2 whitespace-nowrap">
-                              {(isIndoor
-                                ? ['Objects', 'Lighting', 'Color/Material']
-                                : ['Objects', 'Lighting', 'Weather', 'Road Surface']
-                              ).map((axis) => (
-                                <label
-                                  key={axis}
-                                  className="flex items-center gap-1 cursor-pointer"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedAxes.includes(axis)}
-                                    onChange={() => {
-                                      const newAxes = selectedAxes.includes(axis)
-                                        ? selectedAxes.filter(a => a !== axis)
-                                        : [...selectedAxes, axis]
-                                      setSelectedAxes(newAxes)
-                                    }}
-                                    className="w-3 h-3 accent-[#4b6671] cursor-pointer"
-                                  />
-                                  <span className="text-xs text-[#d4d4d4]">{axis}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                        {/* Sparkline */}
+                        <div className="mb-4 flex items-center gap-3">
+                          {successRates.length >= 2 ? (
+                            <>
+                              <Sparkline values={successRates} width={100} height={28} />
+                              <span className={cn(
+                                "text-xs font-mono",
+                                avgSuccess !== null && avgSuccess >= 85 ? 'text-[#5fa35f]' :
+                                  avgSuccess !== null && avgSuccess >= 70 ? 'text-[#c0a854]' : 'text-[#cc6666]'
+                              )}>
+                                {avgSuccess}%
+                              </span>
+                            </>
+                          ) : avgSuccess !== null ? (
+                            <span className={cn(
+                              "text-xs font-mono",
+                              avgSuccess >= 85 ? 'text-[#5fa35f]' :
+                                avgSuccess >= 70 ? 'text-[#c0a854]' : 'text-[#cc6666]'
+                            )}>
+                              {avgSuccess}% avg
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-[#555] italic">No data</span>
+                          )}
+                        </div>
 
-                  {/* Load Dataset Button - 25% width, centered with larger top gap for axes */}
-                  <div className="flex justify-center mt-10">
-                    <button
-                      onClick={handleLoadDataset}
-                      disabled={
-                        uploadLoading ||
-                        (uploadMode === 'local' && !uploadedFiles) ||
-                        (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) ||
-                        (uploadMode === 'huggingface' && !hfRepoId)
-                      }
-                      className="w-1/4 px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
-                      style={{ backgroundColor: '#4b6671' }}
-                    >
-                      {uploadLoading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Loading...
-                        </>
-                      ) : uploadSuccess ? (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-                          Loaded
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-4 h-4" />
-                          Load Dataset
-                        </>
-                      )}
-                    </button>
-                  </div>
+                        {/* Health indicators */}
+                        <div className="flex items-center gap-4 text-[11px] text-[#9aa4b5]">
+                          <span>{totalEpisodes} samples</span>
+                          <span className="text-[#2a2a2a]">·</span>
+                          <span>{task.sessions.length} sessions</span>
+                          {lastUpdated && (
+                            <>
+                              <span className="text-[#2a2a2a]">·</span>
+                              <span>{lastUpdated}</span>
+                            </>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
-              {error && (
-                <div className="mb-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] flex items-center gap-2">
-                  <XCircle className="w-3.5 h-3.5 text-[#cc6666]" />
-                  <span className="text-xs text-[#cc6666]">{error}</span>
-                </div>
-              )}
-
-              {loading && (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-5 h-5 animate-spin text-[#9aa4b5]" />
-                </div>
-              )}
-
-              {/* Data Analysis Section */}
-              {currentDataset && !loading && (
-                <div className="mb-8">
-                  <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Data Analysis</h2>
-                  <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-8">
-                    <DatasetOverview datasetInfo={datasetInfo} />
-                    <DatasetDistributions
-                      datasetName={currentDataset}
-                      aresDistributions={aresDistributions}
-                    />
-                    <EpisodePreview datasetData={datasetData} />
-                  </div>
-                </div>
-              )}
-
-              {/* Dataset Curation Section */}
-              {currentDataset && !loading && (
-                <div className="mb-8">
-                  <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Dataset Curation</h2>
-                  <div className="bg-[#222222] border border-[#2a2a2a] p-6 space-y-6">
-                    {/* Augmentation Card */}
-                    <div>
-                      <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Augmentation</h3>
-                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4">
-                        <AugmentationPanel
-                          datasetName={currentDataset}
-                          onComplete={handleAugmentationComplete}
-                        />
+              {/* Action Queue — Right Panel */}
+              {recommendations.length > 0 && (
+                <div className="hidden xl:block w-72 flex-shrink-0">
+                  <div className="sticky top-14">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Bell className="w-3.5 h-3.5 text-[#666]" />
+                        <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Action Queue</span>
                       </div>
+                      <span className="text-[10px] text-[#555] font-mono">{recommendations.length}</span>
                     </div>
-
-                    {/* Optimization Card - Coming Soon */}
-                    <div>
-                      <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Optimization</h3>
-                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
-                        <OptimizationPanel
-                          datasetName={currentDataset}
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                          <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Update with Test Data Card - Coming Soon */}
-                    <div>
-                      <h3 className="text-xs font-medium mb-2 text-[#d4d4d4]">Update with test data</h3>
-                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-4 opacity-50 pointer-events-none relative">
-                        <TestingPanel datasetName={currentDataset} />
-                        <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] bg-opacity-80">
-                          <span className="text-sm text-[#9aa4b5] font-medium">Coming Soon</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {!currentDataset && !loading && (
-                <div className="text-center py-16">
-                  <p className="text-[#b5becb] text-xs">
-                    Load a dataset to get started
-                  </p>
-                </div>
-              )}
-
-              {/* Export Section */}
-              {currentDataset && !loading && (
-                <div className="mt-4 flex justify-end">
-                  <button
-                    onClick={handleExportDataset}
-                    className="px-4 py-2 text-xs bg-[#4b6671] text-white hover:bg-[#3d5560] transition-colors border border-[#2a2a2a]"
-                  >
-                    Export Dataset
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Evaluation Tab Content */}
-          {activeTab === 'Evaluation' && (
-            <div className="mb-8">
-              {!showEvaluationInsights ? (
-                <div className="mb-8">
-                  <h2 className="text-xs font-medium mb-3 text-[#d4d4d4]">Upload Evaluation Data</h2>
-                  <div className="bg-[#222222] border border-[#2a2a2a] p-6">
-                    <div className="flex items-start gap-4 mb-4">
-                      {/* Input boxes */}
-                      <div className="flex-1 flex items-center gap-4">
-                        {/* Upload Mode Toggle */}
-                        <div className="flex items-center gap-2 border border-[#2a2a2a] rounded p-1 bg-[#1a1a1a]">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setUploadMode('local')
-                              setUploadedFiles(null)
-                              setDatasetPath('')
-                            }}
-                            className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'local'
-                              ? 'bg-[#4b6671] text-white'
-                              : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                              }`}
-                          >
-                            <Folder className="w-3 h-3" />
-                            Local
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setUploadMode('s3')
-                              setUploadedFiles(null)
-                              setDatasetPath('')
-                            }}
-                            className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 's3'
-                              ? 'bg-[#4b6671] text-white'
-                              : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                              }`}
-                          >
-                            <Cloud className="w-3 h-3" />
-                            S3
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setUploadMode('huggingface')
-                              setUploadedFiles(null)
-                              setDatasetPath('')
-                            }}
-                            className={`px-3 py-1.5 text-xs flex items-center gap-1.5 transition-colors ${uploadMode === 'huggingface'
-                              ? 'bg-[#4b6671] text-white'
-                              : 'text-[#9aa4b5] hover:text-[#d4d4d4]'
-                              }`}
-                          >
-                            <Cloud className="w-3 h-3" />
-                            HF
-                          </button>
-                        </div>
-
-                        {/* Local Upload */}
-                        {uploadMode === 'local' && (
-                          <div className="relative w-[576px]">
-                            <input
-                              type="file"
-                              id="folder-upload-eval"
-                              {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-                              multiple
-                              onChange={handleFolderSelect}
-                              className="hidden"
-                            />
-                            <label
-                              htmlFor="folder-upload-eval"
-                              className="w-full px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors cursor-pointer flex items-center gap-2 hover:bg-[#252525]"
-                            >
-                              <Folder className="w-4 h-4 flex-shrink-0" />
-                              <span className="flex-1 truncate">
-                                {datasetPath || 'Select folder...'}
-                              </span>
-                              {uploadedFiles && (
-                                <span className="text-[#9aa4b5] text-[10px]">
-                                  ({uploadedFiles.length} files)
-                                </span>
-                              )}
-                            </label>
-                          </div>
-                        )}
-
-                        {/* S3 Credentials */}
-                        {uploadMode === 's3' && (
-                          <div className="flex flex-col gap-2 w-[576px]">
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="text"
-                                placeholder="Access Key"
-                                value={s3AccessKey}
-                                onChange={(e) => setS3AccessKey(e.target.value)}
-                                autoComplete="off"
-                                data-form-type="other"
-                                className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                              />
-                              <input
-                                type="password"
-                                placeholder="Secret Key"
-                                value={s3SecretKey}
-                                onChange={(e) => setS3SecretKey(e.target.value)}
-                                autoComplete="new-password"
-                                data-form-type="other"
-                                className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="text"
-                                placeholder="Bucket Name"
-                                value={s3Bucket}
-                                onChange={(e) => setS3Bucket(e.target.value)}
-                                className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                              />
-                              <input
-                                type="text"
-                                placeholder="Region (e.g., us-east-1)"
-                                value={s3Region}
-                                onChange={(e) => setS3Region(e.target.value)}
-                                className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                              />
-                            </div>
-                            <input
-                              type="text"
-                              placeholder="Path within bucket (e.g., datasets/my-dataset/)"
-                              value={s3UserPath}
-                              onChange={(e) => {
-                                const path = e.target.value
-                                setS3UserPath(path)
-                                setDatasetPath(path)
-                                if (path) {
-                                  const pathParts = path.split('/').filter(p => p)
-                                  const datasetNameFromPath = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
-                                  setDatasetName(datasetNameFromPath)
-                                } else {
-                                  setDatasetName('')
-                                }
-                              }}
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                          </div>
-                        )}
-
-                        {/* Hugging Face Input */}
-                        {uploadMode === 'huggingface' && (
-                          <div className="flex flex-col gap-2 w-[576px]">
-                            <input
-                              type="text"
-                              placeholder="Repository ID (e.g., username/dataset-name)"
-                              value={hfRepoId}
-                              onChange={(e) => {
-                                const repoId = e.target.value
-                                setHfRepoId(repoId)
-                                setDatasetPath(repoId)
-                                if (repoId) {
-                                  const datasetNameFromRepo = repoId.split('/').pop() || 'dataset'
-                                  setDatasetName(datasetNameFromRepo)
-                                } else {
-                                  setDatasetName('')
-                                }
-                              }}
-                              className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                            />
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="text"
-                                placeholder="Split (default: train)"
-                                value={hfSplit}
-                                onChange={(e) => setHfSplit(e.target.value)}
-                                className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                              />
-                              <input
-                                type="password"
-                                placeholder="HF Token (optional, for private datasets)"
-                                value={hfToken}
-                                onChange={(e) => setHfToken(e.target.value)}
-                                className="px-3 py-2 bg-[#1a1a1a] border border-[#2a2a2a] text-[#d4d4d4] placeholder:text-[#666666] text-xs focus:outline-none focus:border-[#3a3a3a] transition-colors"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Load Dataset Button */}
-                    <div className="flex justify-center mt-10">
-                      <button
-                        onClick={handleEvaluationUpload}
-                        disabled={
-                          uploadLoading ||
-                          (uploadMode === 'local' && !uploadedFiles) ||
-                          (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) ||
-                          (uploadMode === 'huggingface' && !hfRepoId)
-                        }
-                        className="w-1/4 px-3 py-2 text-xs text-white disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors"
-                        style={{ backgroundColor: '#4b6671' }}
-                      >
-                        {uploadLoading ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Loading...
-                          </>
-                        ) : uploadSuccess ? (
-                          <>
-                            <CheckCircle2 className="w-4 h-4" />
-                            Loaded
-                          </>
-                        ) : (
-                          <>
-                            <Upload className="w-4 h-4" />
-                            Load Dataset
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  {error && (
-                    <div className="mb-4 mt-4 p-2.5 bg-[#2a1a1a] border border-[#3a2a2a] flex items-center gap-2">
-                      <XCircle className="w-3.5 h-3.5 text-[#cc6666]" />
-                      <span className="text-xs text-[#cc6666]">{error}</span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-medium text-[#d4d4d4]">Evaluation Insights</h2>
-                    <button
-                      onClick={() => {
-                        setShowEvaluationInsights(false)
-                        setUploadSuccess(false)
-                      }}
-                      className="text-xs text-[#4b6671] hover:underline"
-                    >
-                      Upload different dataset
-                    </button>
-                  </div>
-                  <div className="bg-[#222222] border border-[#2a2a2a] p-6">
-                    {/* Placeholder Content */}
-                    <div className="grid grid-cols-2 gap-6 mb-6">
-                      <div className="bg-[#1a1a1a] p-4 border border-[#2a2a2a]">
-                        <h3 className="text-xs font-medium text-[#9aa4b5] mb-2">Success Rate</h3>
-                        <div className="text-2xl font-bold text-[#4b6671]">87.5%</div>
-                        <div className="text-xs text-[#666] mt-1">Based on 120 episodes</div>
-                      </div>
-                      <div className="bg-[#1a1a1a] p-4 border border-[#2a2a2a]">
-                        <h3 className="text-xs font-medium text-[#9aa4b5] mb-2">Failure Modes</h3>
-                        <div className="h-32 flex items-center justify-center text-[#666] text-xs">
-                          <span className="italic">Chart Placeholder: Failure Categories</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="bg-[#1a1a1a] p-4 border border-[#2a2a2a]">
-                      <h3 className="text-xs font-medium text-[#9aa4b5] mb-2">Performance Analysis</h3>
-                      <p className="text-xs text-[#d4d4d4] leading-relaxed">
-                        The robot demonstrated strong performance in unobstructed paths but showed higher failure rates in low-light conditions.
-                        Response latency increased by 15% during complex object interactions.
-                        <br /><br />
-                        <strong>Modelling Accuracy:</strong> The model accurately predicted 92% of dynamic obstacle trajectories, but underestimated friction coefficients on wet surfaces by 12%.
-                      </p>
+                    <div className="space-y-2">
+                      {recommendations.map((rec, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => router.push(`/dataset/${encodeURIComponent(rec.taskName)}`)}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-left hover:bg-white/[0.07] hover:border-white/[0.15] transition-all group"
+                        >
+                          <div className="text-[11px] font-medium text-white mb-1 group-hover:text-white/90">{rec.taskName}</div>
+                          <div className="text-[11px] text-[#9aa4b5] leading-relaxed">{rec.message}</div>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
               )}
             </div>
-          )}
-        </main>
+
+            {/* Action Queue — Mobile/Tablet banner (collapsed) */}
+            {recommendations.length > 0 && (
+              <div className="xl:hidden mt-6">
+                <button
+                  onClick={() => setIsActionQueueExpanded(!isActionQueueExpanded)}
+                  className="w-full flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-3.5 h-3.5 text-[#666]" />
+                    <span className="text-[10px] uppercase tracking-widest text-[#666] font-medium">Action Queue</span>
+                    <span className="text-[10px] text-[#555] font-mono ml-1">{recommendations.length}</span>
+                  </div>
+                  {isActionQueueExpanded
+                    ? <ChevronDown className="w-3.5 h-3.5 text-[#666]" />
+                    : <ChevronRight className="w-3.5 h-3.5 text-[#666]" />
+                  }
+                </button>
+                {isActionQueueExpanded && (
+                  <div className="mt-2 space-y-2">
+                    {recommendations.map((rec, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => router.push(`/dataset/${encodeURIComponent(rec.taskName)}`)}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3.5 text-left hover:bg-white/[0.07] transition-all"
+                      >
+                        <div className="text-[11px] font-medium text-white mb-1">{rec.taskName}</div>
+                        <div className="text-[11px] text-[#9aa4b5]">{rec.message}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </main>
+        </>
       )}
 
       {/* Login Modal */}
@@ -1445,7 +1108,6 @@ export default function Home() {
           setIsLoginModalOpen(true)
         }}
       />
-    </div >
+    </div>
   )
 }
-
