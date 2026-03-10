@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ChevronRight, ChevronDown, Folder, Cloud } from 'lucide-react'
 import AugmentationPanel from '@/components/AugmentationPanel'
 import OptimizationPanel from '@/components/OptimizationPanel'
+import TestingPanel from '@/components/TestingPanel'
 import EpisodePreview from '@/components/EpisodePreview'
 
 interface ActionsTabProps {
@@ -29,6 +30,13 @@ interface ActionsTabProps {
     uploadSuccess: boolean
     setDatasetPath: (v: string) => void
     setDatasetName: (v: string) => void
+    // Augmentation settings (migrated from SettingsTab)
+    isIndoor: boolean
+    setIsIndoor: (v: boolean) => void
+    isOutdoor: boolean
+    setIsOutdoor: (v: boolean) => void
+    selectedAxes: string[]
+    setSelectedAxes: (v: string[]) => void
 }
 
 function AccordionPanel({ title, statusText, children }: {
@@ -55,23 +63,67 @@ function AccordionPanel({ title, statusText, children }: {
     )
 }
 
+const INDOOR_AXES = ['Objects', 'Lighting', 'Color/Material']
+const OUTDOOR_AXES = ['Objects', 'Lighting', 'Weather', 'Road Surface']
+
 const inputClass = "px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/30 text-xs rounded-xl focus:outline-none focus:border-white/20 transition-colors"
 
 export default function ActionsTab(props: ActionsTabProps) {
-    const [augMode, setAugMode] = useState<'automated' | 'manual'>('manual')
+    const availableAxes = props.isIndoor ? INDOOR_AXES : props.isOutdoor ? OUTDOOR_AXES : []
+
+    const toggleAxis = (axis: string) => {
+        props.setSelectedAxes(
+            props.selectedAxes.includes(axis)
+                ? props.selectedAxes.filter(a => a !== axis)
+                : [...props.selectedAxes, axis]
+        )
+    }
 
     return (
         <div className="space-y-3">
             {/* Augmentation */}
             <AccordionPanel title="Augmentation" statusText="Ready">
-                <div className="mb-4 flex items-center gap-3">
-                    <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Mode</span>
-                    <div className="inline-flex rounded-xl border border-white/10 text-[11px]">
-                        <button onClick={() => setAugMode('automated')} className={`px-4 py-1.5 rounded-l-xl transition-colors ${augMode === 'automated' ? 'bg-white/10 text-white' : 'text-white/60'}`}>Automated</button>
-                        <button onClick={() => setAugMode('manual')} className={`px-4 py-1.5 rounded-r-xl border-l border-white/10 transition-colors ${augMode === 'manual' ? 'bg-white/10 text-white' : 'text-white/60'}`}>Manual</button>
-                    </div>
-                </div>
                 <AugmentationPanel datasetName={props.datasetName} onComplete={props.onAugmentationComplete} />
+
+                {/* Augmentation Settings (migrated from Settings tab) */}
+                <div className="mt-6 pt-5 border-t border-white/10 space-y-5">
+                    <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Augmentation Settings</span>
+
+                    {/* Environment */}
+                    <div>
+                        <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Environment</span>
+                        <div className="mt-3 flex items-center gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                                <input type="checkbox" checked={props.isIndoor} onChange={() => { props.setIsIndoor(!props.isIndoor); if (!props.isIndoor) props.setIsOutdoor(false) }}
+                                    className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
+                                <span className="text-sm text-white group-hover:text-white/80 transition-colors">Indoor</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                                <input type="checkbox" checked={props.isOutdoor} onChange={() => { props.setIsOutdoor(!props.isOutdoor); if (!props.isOutdoor) props.setIsIndoor(false) }}
+                                    className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
+                                <span className="text-sm text-white group-hover:text-white/80 transition-colors">Outdoor</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    {/* Distribution Axes */}
+                    {availableAxes.length > 0 && (
+                        <div>
+                            <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Distribution Axes</span>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {availableAxes.map(axis => (
+                                    <button key={axis} type="button" onClick={() => toggleAxis(axis)}
+                                        className={`px-4 py-2 text-xs rounded-xl border transition-all ${props.selectedAxes.includes(axis)
+                                            ? 'bg-white/10 border-white/30 text-white shadow-lg shadow-white/5'
+                                            : 'bg-transparent border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                                            }`}>
+                                        {axis}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </AccordionPanel>
 
             {/* Optimisation */}
@@ -138,6 +190,11 @@ export default function ActionsTab(props: ActionsTabProps) {
                         {props.uploadLoading ? 'Uploading...' : 'Upload'}
                     </button>
                 </div>
+            </AccordionPanel>
+
+            {/* Import Test Runs */}
+            <AccordionPanel title="Import Test Runs" statusText="Ready">
+                <TestingPanel datasetName={props.datasetName} />
             </AccordionPanel>
 
             {/* Data Explorer */}

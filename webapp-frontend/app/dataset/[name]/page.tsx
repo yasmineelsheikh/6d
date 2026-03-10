@@ -14,22 +14,18 @@ import { cn } from '@/lib/utils'
 
 import OverviewTab from '@/components/tabs/OverviewTab'
 import HistoryTab from '@/components/tabs/HistoryTab'
-import TestRunsTab from '@/components/tabs/TestRunsTab'
 import ActionsTab from '@/components/tabs/ActionsTab'
-import SettingsTab from '@/components/tabs/SettingsTab'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || ''
 
 interface DatasetInfo { dataset_name: string; total_episodes: number; robot_type: string }
 interface Visualization { title: string; figure: any }
 
-type TabKey = 'overview' | 'history' | 'test-runs' | 'actions' | 'settings'
+type TabKey = 'overview' | 'actions' | 'history'
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
-  { key: 'history', label: 'History' },
-  { key: 'test-runs', label: 'Test Runs' },
   { key: 'actions', label: 'Actions' },
-  { key: 'settings', label: 'Settings' },
+  { key: 'history', label: 'History' },
 ]
 
 // Seed tasks for SideMenu
@@ -301,7 +297,6 @@ export default function DatasetPage() {
           <div>
             <h2 className="text-lg font-light text-white">{decodeURIComponent(datasetName)}</h2>
             {datasetInfo?.robot_type && <p className="text-[11px] text-white/40 mt-1">{datasetInfo.robot_type}</p>}
-            {environment && <span className="inline-block mt-2 px-2 py-0.5 text-[10px] text-white/40 bg-white/5 border border-white/10 rounded-full">{environment}</span>}
           </div>
         </aside>
 
@@ -333,10 +328,8 @@ export default function DatasetPage() {
             {!loading && (
               <div className="p-6">
                 {activeTab === 'overview' && <OverviewTab datasetName={datasetName} datasetInfo={datasetInfo} aresDistributions={aresDistributions} newDistributions={newDistributions} distributionsLoading={distributionsLoading} analysisView={analysisView} setAnalysisView={setAnalysisView} analysisSwitchEnabled={analysisSwitchEnabled} variationsIncluded={variationsIncluded} hasNoData={hasNoData} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
+                {activeTab === 'actions' && <ActionsTab datasetName={datasetName} datasetData={datasetData} onAugmentationComplete={handleAugmentationComplete} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} isIndoor={isIndoor} setIsIndoor={setIsIndoor} isOutdoor={isOutdoor} setIsOutdoor={setIsOutdoor} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} />}
                 {activeTab === 'history' && <HistoryTab />}
-                {activeTab === 'test-runs' && <TestRunsTab datasetName={datasetName} datasetData={datasetData} />}
-                {activeTab === 'actions' && <ActionsTab datasetName={datasetName} datasetData={datasetData} onAugmentationComplete={handleAugmentationComplete} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} />}
-                {activeTab === 'settings' && <SettingsTab environment={environment} isIndoor={isIndoor} setIsIndoor={setIsIndoor} isOutdoor={isOutdoor} setIsOutdoor={setIsOutdoor} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} />}
               </div>
             )}
           </div>
