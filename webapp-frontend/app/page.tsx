@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight, Folder, Cloud, Plus, ArrowRight, TrendingUp, AlertCircle } from 'lucide-react'
+import { Upload, Loader2, CheckCircle2, XCircle, Menu, ChevronDown, ChevronRight, Folder, Cloud, Plus, ArrowRight, TrendingUp } from 'lucide-react'
 import DatasetOverview from '@/components/DatasetOverview'
 import DatasetDistributions from '@/components/DatasetDistributions'
 import EpisodePreview from '@/components/EpisodePreview'
@@ -752,17 +752,7 @@ export default function Home() {
 
   const fleetStats = useMemo(() => {
     const total = evaluationTasks.length
-    const flagged = evaluationTasks.filter(t => {
-      if (t.sessions.length === 0) return true
-      if (t.sessions.length >= 2) {
-        const last = t.sessions[t.sessions.length - 1].successRate
-        const prev = t.sessions[t.sessions.length - 2].successRate
-        return last < prev
-      }
-      return false
-    }).length
-    const pendingReviews = evaluationTasks.filter(t => t.sessions.length > 0 && t.sessions.some(s => s.successRate < 80)).length
-    return { total, flagged, pendingReviews }
+    return { total }
   }, [evaluationTasks])
 
 
@@ -906,18 +896,6 @@ export default function Home() {
                 <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Tasks</span>
                 <span className="text-sm font-medium text-white">{fleetStats.total}</span>
               </div>
-              <div className="h-3 w-px bg-[#2a2a2a]" />
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#c0a854]" />
-                <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Flagged</span>
-                <span className="text-sm font-medium text-[#c0a854]">{fleetStats.flagged}</span>
-              </div>
-              <div className="h-3 w-px bg-[#2a2a2a]" />
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#cc6666]" />
-                <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Needs Review</span>
-                <span className="text-sm font-medium text-[#cc6666]">{fleetStats.pendingReviews}</span>
-              </div>
             </div>
           </div>
 
@@ -933,8 +911,7 @@ export default function Home() {
                 const lastUpdated = task.sessions.length > 0
                   ? task.sessions[task.sessions.length - 1].uploadedAt
                   : null
-                const isFlagged = task.sessions.length === 0 ||
-                  (task.sessions.length >= 2 && task.sessions[task.sessions.length - 1].successRate < task.sessions[task.sessions.length - 2].successRate)
+
 
                 return (
                   <button
@@ -943,17 +920,9 @@ export default function Home() {
                     className="bg-white/5 border border-white/10 rounded-xl p-5 text-left hover:bg-white/[0.07] hover:border-white/[0.15] transition-all group"
                   >
                     {/* Card header */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-2.5">
-                        <StatusDot rate={avgSuccess} />
-                        <h3 className="text-sm font-medium text-white group-hover:text-white/90">{task.name}</h3>
-                      </div>
-                      {isFlagged && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-[#c0a854] bg-[#c0a854]/10 rounded-full">
-                          <AlertCircle className="w-2.5 h-2.5" />
-                          Attention
-                        </span>
-                      )}
+                    <div className="flex items-center gap-2.5 mb-4">
+                      <StatusDot rate={avgSuccess} />
+                      <h3 className="text-sm font-medium text-white group-hover:text-white/90">{task.name}</h3>
                     </div>
 
                     {/* Sparkline */}
@@ -998,9 +967,10 @@ export default function Home() {
                 )
               })}
             </div>
-          </main>
+          </main >
         </>
-      )}
+      )
+      }
 
       {/* Login Modal */}
       <LoginModal
@@ -1021,6 +991,6 @@ export default function Home() {
           setIsLoginModalOpen(true)
         }}
       />
-    </div>
+    </div >
   )
 }

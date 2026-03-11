@@ -34,6 +34,13 @@ interface OverviewTabProps {
     uploadSuccess?: boolean
     setDatasetPath?: (v: string) => void
     setDatasetName?: (v: string) => void
+    // Augmentation settings
+    isIndoor?: boolean
+    setIsIndoor?: (v: boolean) => void
+    isOutdoor?: boolean
+    setIsOutdoor?: (v: boolean) => void
+    selectedAxes?: string[]
+    setSelectedAxes?: (v: string[]) => void
 }
 
 export default function OverviewTab(props: OverviewTabProps) {
@@ -115,6 +122,50 @@ export default function OverviewTab(props: OverviewTabProps) {
                             <Upload className="w-3.5 h-3.5" />
                             {props.uploadLoading ? 'Uploading...' : 'Upload Dataset'}
                         </button>
+                    </div>
+
+                    {/* Environment & Axes — subtle settings */}
+                    <div className="w-full max-w-lg mt-6 pt-5 border-t border-white/5">
+                        <span className="text-[10px] uppercase tracking-widest text-white/20 font-medium">Environment</span>
+                        <div className="mt-2 flex items-center gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                                <input type="checkbox" checked={props.isIndoor || false} onChange={() => { props.setIsIndoor?.(!props.isIndoor); if (!props.isIndoor) props.setIsOutdoor?.(false) }}
+                                    className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
+                                <span className="text-xs text-white/40 group-hover:text-white/60 transition-colors">Indoor</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                                <input type="checkbox" checked={props.isOutdoor || false} onChange={() => { props.setIsOutdoor?.(!props.isOutdoor); if (!props.isOutdoor) props.setIsIndoor?.(false) }}
+                                    className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
+                                <span className="text-xs text-white/40 group-hover:text-white/60 transition-colors">Outdoor</span>
+                            </label>
+                        </div>
+
+                        {(() => {
+                            const INDOOR_AXES = ['Objects', 'Lighting', 'Color/Material']
+                            const OUTDOOR_AXES = ['Objects', 'Lighting', 'Weather', 'Road Surface']
+                            const availableAxes = props.isIndoor ? INDOOR_AXES : props.isOutdoor ? OUTDOOR_AXES : []
+                            const toggleAxis = (axis: string) => {
+                                const current = props.selectedAxes || []
+                                props.setSelectedAxes?.(current.includes(axis) ? current.filter(a => a !== axis) : [...current, axis])
+                            }
+                            if (availableAxes.length === 0) return null
+                            return (
+                                <div className="mt-3">
+                                    <span className="text-[10px] uppercase tracking-widest text-white/20 font-medium">Distribution Axes</span>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                        {availableAxes.map(axis => (
+                                            <button key={axis} type="button" onClick={() => toggleAxis(axis)}
+                                                className={`px-3 py-1.5 text-[11px] rounded-lg border transition-all ${(props.selectedAxes || []).includes(axis)
+                                                    ? 'bg-white/10 border-white/20 text-white/60'
+                                                    : 'bg-transparent border-white/5 text-white/20 hover:text-white/40 hover:border-white/10'
+                                                    }`}>
+                                                {axis}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        })()}
                     </div>
                 </div>
             </div>
