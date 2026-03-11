@@ -3,17 +3,13 @@
 import { Upload, Folder, Cloud } from 'lucide-react'
 import DatasetOverview from '@/components/DatasetOverview'
 import DatasetDistributions from '@/components/DatasetDistributions'
+import EpisodePreview from '@/components/EpisodePreview'
 
 interface OverviewTabProps {
     datasetName: string
     datasetInfo: any
     aresDistributions: any[]
-    newDistributions: any[]
     distributionsLoading: boolean
-    analysisView: 'original' | 'new'
-    setAnalysisView: (v: 'original' | 'new') => void
-    analysisSwitchEnabled: boolean
-    variationsIncluded: boolean
     hasNoData?: boolean
     // Upload props for fallback
     uploadMode?: 'local' | 's3' | 'huggingface'
@@ -35,19 +31,15 @@ interface OverviewTabProps {
     setDatasetPath?: (v: string) => void
     setDatasetName?: (v: string) => void
     // Augmentation settings
-    isIndoor?: boolean
-    setIsIndoor?: (v: boolean) => void
-    isOutdoor?: boolean
-    setIsOutdoor?: (v: boolean) => void
     selectedAxes?: string[]
     setSelectedAxes?: (v: string[]) => void
+    customAugmentationText?: string
+    setCustomAugmentationText?: (v: string) => void
 }
 
 export default function OverviewTab(props: OverviewTabProps) {
     const {
-        datasetName, datasetInfo, aresDistributions, newDistributions,
-        distributionsLoading, analysisView, setAnalysisView, analysisSwitchEnabled, variationsIncluded,
-        hasNoData
+        datasetName, datasetInfo, aresDistributions, distributionsLoading, hasNoData
     } = props
 
     // No data state — show upload prompt
@@ -124,36 +116,20 @@ export default function OverviewTab(props: OverviewTabProps) {
                         </button>
                     </div>
 
-                    {/* Environment & Axes — subtle settings */}
+                    {/* Axes — subtle settings */}
                     <div className="w-full max-w-lg mt-6 pt-5 border-t border-white/5">
-                        <span className="text-[10px] uppercase tracking-widest text-white/20 font-medium">Environment</span>
-                        <div className="mt-2 flex items-center gap-4">
-                            <label className="flex items-center gap-2 cursor-pointer group">
-                                <input type="checkbox" checked={props.isIndoor || false} onChange={() => { props.setIsIndoor?.(!props.isIndoor); if (!props.isIndoor) props.setIsOutdoor?.(false) }}
-                                    className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
-                                <span className="text-xs text-white/40 group-hover:text-white/60 transition-colors">Indoor</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer group">
-                                <input type="checkbox" checked={props.isOutdoor || false} onChange={() => { props.setIsOutdoor?.(!props.isOutdoor); if (!props.isOutdoor) props.setIsIndoor?.(false) }}
-                                    className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
-                                <span className="text-xs text-white/40 group-hover:text-white/60 transition-colors">Outdoor</span>
-                            </label>
-                        </div>
-
+                        <span className="text-[10px] uppercase tracking-widest text-white/20 font-medium">Axes</span>
                         {(() => {
-                            const INDOOR_AXES = ['Objects', 'Lighting', 'Color/Material']
-                            const OUTDOOR_AXES = ['Objects', 'Lighting', 'Weather', 'Road Surface']
-                            const availableAxes = props.isIndoor ? INDOOR_AXES : props.isOutdoor ? OUTDOOR_AXES : []
+                            const ALL_AXES = ['Objects', 'Lighting', 'Color/Material', 'Weather', 'Road Surface']
                             const toggleAxis = (axis: string) => {
                                 const current = props.selectedAxes || []
                                 props.setSelectedAxes?.(current.includes(axis) ? current.filter(a => a !== axis) : [...current, axis])
                             }
-                            if (availableAxes.length === 0) return null
+                            const isCustomSelected = (props.selectedAxes || []).includes('Custom')
                             return (
-                                <div className="mt-3">
-                                    <span className="text-[10px] uppercase tracking-widest text-white/20 font-medium">Distribution Axes</span>
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                        {availableAxes.map(axis => (
+                                <div className="mt-2">
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {ALL_AXES.map(axis => (
                                             <button key={axis} type="button" onClick={() => toggleAxis(axis)}
                                                 className={`px-3 py-1.5 text-[11px] rounded-lg border transition-all ${(props.selectedAxes || []).includes(axis)
                                                     ? 'bg-white/10 border-white/20 text-white/60'
@@ -162,7 +138,23 @@ export default function OverviewTab(props: OverviewTabProps) {
                                                 {axis}
                                             </button>
                                         ))}
+                                        <button type="button" onClick={() => toggleAxis('Custom')}
+                                            className={`px-3 py-1.5 text-[11px] rounded-lg border transition-all ${isCustomSelected
+                                                ? 'bg-white/10 border-white/20 text-white/60'
+                                                : 'bg-transparent border-white/5 text-white/20 hover:text-white/40 hover:border-white/10'
+                                                }`}>
+                                            Custom
+                                        </button>
                                     </div>
+                                    {isCustomSelected && (
+                                        <textarea
+                                            value={props.customAugmentationText || ''}
+                                            onChange={e => props.setCustomAugmentationText?.(e.target.value)}
+                                            placeholder="Describe the augmentation you want..."
+                                            className="mt-2 w-full px-3 py-2 bg-white/5 border border-white/10 text-white/60 text-xs placeholder:text-white/20 rounded-xl focus:outline-none focus:border-white/20 transition-colors resize-none"
+                                            rows={3}
+                                        />
+                                    )}
                                 </div>
                             )
                         })()}
@@ -174,35 +166,19 @@ export default function OverviewTab(props: OverviewTabProps) {
 
     return (
         <div className="space-y-6">
-            {/* Original / New toggle */}
-            <div className="flex items-center justify-end">
-                <div className={`inline-flex rounded-lg border border-white/10 text-[11px] ${!analysisSwitchEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                    <button
-                        type="button"
-                        onClick={() => analysisSwitchEnabled && setAnalysisView('original')}
-                        className={`px-3 py-1.5 rounded-l-lg transition-colors ${analysisView === 'original' ? 'bg-white/10 text-white' : 'text-white/40'}`}
-                    >Original</button>
-                    <button
-                        type="button"
-                        onClick={() => analysisSwitchEnabled && setAnalysisView('new')}
-                        className={`px-3 py-1.5 rounded-r-lg border-l border-white/10 transition-colors ${analysisView === 'new' ? 'bg-white/10 text-white' : 'text-white/40'}`}
-                    >New</button>
-                </div>
-            </div>
-
             <DatasetOverview datasetInfo={datasetInfo} />
-
-            {analysisView === 'new' && !variationsIncluded && !distributionsLoading && (
-                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                    <p className="text-white text-xs">Run augmentation to see updated distributions.</p>
-                </div>
-            )}
 
             <DatasetDistributions
                 datasetName={datasetName}
-                aresDistributions={analysisView === 'new' ? newDistributions : aresDistributions}
+                aresDistributions={aresDistributions}
                 loading={distributionsLoading}
             />
+
+            {!distributionsLoading && (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+                    <EpisodePreview datasetData={props.datasetData} />
+                </div>
+            )}
         </div>
     )
 }

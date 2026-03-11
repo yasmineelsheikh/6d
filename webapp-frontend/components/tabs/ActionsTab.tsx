@@ -4,8 +4,6 @@ import { useState } from 'react'
 import { ChevronRight, ChevronDown, Folder, Cloud } from 'lucide-react'
 import AugmentationPanel from '@/components/AugmentationPanel'
 import OptimizationPanel from '@/components/OptimizationPanel'
-import TestingPanel from '@/components/TestingPanel'
-import EpisodePreview from '@/components/EpisodePreview'
 
 interface ActionsTabProps {
     datasetName: string
@@ -30,13 +28,11 @@ interface ActionsTabProps {
     uploadSuccess: boolean
     setDatasetPath: (v: string) => void
     setDatasetName: (v: string) => void
-    // Augmentation settings (migrated from SettingsTab)
-    isIndoor: boolean
-    setIsIndoor: (v: boolean) => void
-    isOutdoor: boolean
-    setIsOutdoor: (v: boolean) => void
+    // Augmentation settings
     selectedAxes: string[]
     setSelectedAxes: (v: string[]) => void
+    customAugmentationText: string
+    setCustomAugmentationText: (v: string) => void
 }
 
 function AccordionPanel({ title, statusText, children }: {
@@ -63,14 +59,11 @@ function AccordionPanel({ title, statusText, children }: {
     )
 }
 
-const INDOOR_AXES = ['Objects', 'Lighting', 'Color/Material']
-const OUTDOOR_AXES = ['Objects', 'Lighting', 'Weather', 'Road Surface']
+const ALL_AXES = ['Objects', 'Lighting', 'Color/Material', 'Weather', 'Road Surface']
 
 const inputClass = "px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/30 text-xs rounded-xl focus:outline-none focus:border-white/20 transition-colors"
 
 export default function ActionsTab(props: ActionsTabProps) {
-    const availableAxes = props.isIndoor ? INDOOR_AXES : props.isOutdoor ? OUTDOOR_AXES : []
-
     const toggleAxis = (axis: string) => {
         props.setSelectedAxes(
             props.selectedAxes.includes(axis)
@@ -79,50 +72,49 @@ export default function ActionsTab(props: ActionsTabProps) {
         )
     }
 
+    const isCustomSelected = props.selectedAxes.includes('Custom')
+
     return (
         <div className="space-y-3">
             {/* Augmentation */}
             <AccordionPanel title="Augmentation" statusText="Ready">
                 <AugmentationPanel datasetName={props.datasetName} onComplete={props.onAugmentationComplete} />
 
-                {/* Augmentation Settings (migrated from Settings tab) */}
+                {/* Augmentation Settings */}
                 <div className="mt-6 pt-5 border-t border-white/10 space-y-5">
                     <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Augmentation Settings</span>
 
-                    {/* Environment */}
+                    {/* Axes */}
                     <div>
-                        <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Environment</span>
-                        <div className="mt-3 flex items-center gap-4">
-                            <label className="flex items-center gap-2 cursor-pointer group">
-                                <input type="checkbox" checked={props.isIndoor} onChange={() => { props.setIsIndoor(!props.isIndoor); if (!props.isIndoor) props.setIsOutdoor(false) }}
-                                    className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
-                                <span className="text-sm text-white group-hover:text-white/80 transition-colors">Indoor</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer group">
-                                <input type="checkbox" checked={props.isOutdoor} onChange={() => { props.setIsOutdoor(!props.isOutdoor); if (!props.isOutdoor) props.setIsIndoor(false) }}
-                                    className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#4b6671] focus:ring-0 focus:ring-offset-0" />
-                                <span className="text-sm text-white group-hover:text-white/80 transition-colors">Outdoor</span>
-                            </label>
+                        <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Axes</span>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            {ALL_AXES.map(axis => (
+                                <button key={axis} type="button" onClick={() => toggleAxis(axis)}
+                                    className={`px-4 py-2 text-xs rounded-xl border transition-all ${props.selectedAxes.includes(axis)
+                                        ? 'bg-white/10 border-white/30 text-white shadow-lg shadow-white/5'
+                                        : 'bg-transparent border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                                        }`}>
+                                    {axis}
+                                </button>
+                            ))}
+                            <button type="button" onClick={() => toggleAxis('Custom')}
+                                className={`px-4 py-2 text-xs rounded-xl border transition-all ${isCustomSelected
+                                    ? 'bg-white/10 border-white/30 text-white shadow-lg shadow-white/5'
+                                    : 'bg-transparent border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                                    }`}>
+                                Custom
+                            </button>
                         </div>
+                        {isCustomSelected && (
+                            <textarea
+                                value={props.customAugmentationText}
+                                onChange={e => props.setCustomAugmentationText(e.target.value)}
+                                placeholder="Describe the augmentation you want..."
+                                className="mt-3 w-full px-3 py-2.5 bg-white/5 border border-white/10 text-white text-xs placeholder:text-white/30 rounded-xl focus:outline-none focus:border-white/20 transition-colors resize-none"
+                                rows={3}
+                            />
+                        )}
                     </div>
-
-                    {/* Distribution Axes */}
-                    {availableAxes.length > 0 && (
-                        <div>
-                            <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Distribution Axes</span>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                {availableAxes.map(axis => (
-                                    <button key={axis} type="button" onClick={() => toggleAxis(axis)}
-                                        className={`px-4 py-2 text-xs rounded-xl border transition-all ${props.selectedAxes.includes(axis)
-                                            ? 'bg-white/10 border-white/30 text-white shadow-lg shadow-white/5'
-                                            : 'bg-transparent border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                                            }`}>
-                                        {axis}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                 </div>
             </AccordionPanel>
 
@@ -194,12 +186,65 @@ export default function ActionsTab(props: ActionsTabProps) {
 
             {/* Import Test Runs */}
             <AccordionPanel title="Import Test Runs" statusText="Ready">
-                <TestingPanel datasetName={props.datasetName} />
+                <div className="space-y-4">
+                    <div className="flex items-center gap-1.5 border border-white/10 rounded-xl p-1 bg-[#1a1a1a] w-fit">
+                        {(['local', 's3', 'huggingface'] as const).map((mode) => (
+                            <button key={mode} type="button"
+                                onClick={() => props.setUploadMode(mode)}
+                                className={`px-4 py-2 text-xs flex items-center gap-1.5 rounded-lg transition-colors ${props.uploadMode === mode ? 'bg-white/10 text-white' : 'text-white/60 hover:text-white'}`}
+                            >
+                                {mode === 'local' ? <Folder className="w-3 h-3" /> : <Cloud className="w-3 h-3" />}
+                                {mode === 'local' ? 'Local' : mode === 's3' ? 'S3' : 'HF'}
+                            </button>
+                        ))}
+                    </div>
+
+                    {props.uploadMode === 'local' && (
+                        <div className="relative">
+                            <input type="file" id="folder-upload-test-runs"
+                                {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+                                multiple onChange={props.handleFolderSelect} className="hidden" />
+                            <label htmlFor="folder-upload-test-runs"
+                                className={`w-full ${inputClass} cursor-pointer flex items-center gap-2 hover:bg-white/[0.03]`}>
+                                <Folder className="w-4 h-4 flex-shrink-0 text-white/40" />
+                                <span className="flex-1 truncate">{props.datasetPath || 'Select folder...'}</span>
+                            </label>
+                        </div>
+                    )}
+
+                    {props.uploadMode === 's3' && (
+                        <div className="flex flex-col gap-3">
+                            <div className="grid grid-cols-2 gap-3">
+                                <input type="text" placeholder="Access Key" value={props.s3AccessKey} onChange={e => props.setS3AccessKey(e.target.value)} className={inputClass} />
+                                <input type="password" placeholder="Secret Key" value={props.s3SecretKey} onChange={e => props.setS3SecretKey(e.target.value)} className={inputClass} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <input type="text" placeholder="Bucket" value={props.s3Bucket} onChange={e => props.setS3Bucket(e.target.value)} className={inputClass} />
+                                <input type="text" placeholder="Region" value={props.s3Region} onChange={e => props.setS3Region(e.target.value)} className={inputClass} />
+                            </div>
+                            <input type="text" placeholder="Path within bucket" value={props.s3UserPath} onChange={e => { props.setS3UserPath(e.target.value); props.setDatasetPath(e.target.value) }} className={inputClass} />
+                        </div>
+                    )}
+
+                    {props.uploadMode === 'huggingface' && (
+                        <div className="flex flex-col gap-3">
+                            <input type="text" placeholder="Repository ID (e.g. org/dataset)" value={props.hfRepoId} onChange={e => { props.setHfRepoId(e.target.value); props.setDatasetPath(e.target.value) }} className={inputClass} />
+                            <div className="grid grid-cols-2 gap-3">
+                                <input type="text" placeholder="Split (default: train)" value={props.hfSplit} onChange={e => props.setHfSplit(e.target.value)} className={inputClass} />
+                                <input type="password" placeholder="HF Token (optional)" value={props.hfToken} onChange={e => props.setHfToken(e.target.value)} className={inputClass} />
+                            </div>
+                        </div>
+                    )}
+
+                    <button onClick={props.handleLoadDataset} disabled={props.uploadLoading}
+                        className="px-5 py-2.5 text-xs text-white bg-gradient-to-r from-[#4b6671] to-[#3d5f6f] hover:from-[#567a86] hover:to-[#4b6f7f] disabled:opacity-30 disabled:cursor-not-allowed transition-all rounded-xl flex items-center gap-1.5">
+                        {props.uploadLoading ? 'Uploading...' : 'Upload'}
+                    </button>
+                </div>
             </AccordionPanel>
 
             {/* Data Explorer */}
             <AccordionPanel title="Data Explorer" statusText={`${props.datasetData.length} episodes`}>
-                <EpisodePreview datasetData={props.datasetData} />
             </AccordionPanel>
         </div>
     )
