@@ -7,6 +7,8 @@ import SideMenu from '@/components/SideMenu'
 import TaskModal, { TaskData } from '@/components/TaskModal'
 import SettingsModal, { SettingsData } from '@/components/SettingsModal'
 import BillingModal from '@/components/BillingModal'
+import OptimizationPanel from '@/components/OptimizationPanel'
+import AugmentationPanel from '@/components/AugmentationPanel'
 import LoginModal from '@/components/LoginModal'
 import RegisterModal from '@/components/RegisterModal'
 import { useAuth } from '@/contexts/AuthContext'
@@ -46,12 +48,9 @@ export default function DatasetPage() {
   const [ingestionComplete, setIngestionComplete] = useState(false)
   const [waitingForIngestion, setWaitingForIngestion] = useState(true)
   const [ingestionProgress, setIngestionProgress] = useState(0)
-  const [analysisView, setAnalysisView] = useState<'original' | 'new'>('original')
-  const [analysisSwitchEnabled, setAnalysisSwitchEnabled] = useState(false)
 
   const [aresDistributions, setAresDistributions] = useState<Visualization[]>([])
   const [newDistributions, setNewDistributions] = useState<Visualization[]>([])
-  const [variationsIncluded, setVariationsIncluded] = useState(false)
 
   const { user, isAuthenticated, loading: authLoading, logout } = useAuth()
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
@@ -108,7 +107,6 @@ export default function DatasetPage() {
       if (!dataResponse.ok) throw new Error('Failed to load curated data')
       const data = await dataResponse.json()
       setCuratedData(data.data || [])
-      setAnalysisSwitchEnabled(true)
     } catch (err: any) { setError(err.message) }
   }
 
@@ -267,23 +265,18 @@ export default function DatasetPage() {
         if (datasetName) params.append('dataset_name', datasetName)
         if (environment) params.append('environment', environment)
         params.append('axes', JSON.stringify(selectedAxes))
-        if (analysisView === 'new') params.append('include_variations', 'true')
-        else params.append('include_variations', 'false')
-
         const url = `${API_BASE}/api/ares/distributions?${params.toString()}`
         const distResponse = await fetch(url)
         if (distResponse.ok) {
           const distData = await distResponse.json()
           const vizs = distData.visualizations || []
-          const vi = distData.variations_included || false
-          if (analysisView === 'new') { if (vizs.length > 0) { setNewDistributions(vizs); setVariationsIncluded(vi) } else { setVariationsIncluded(false) } }
-          else { if (vizs.length > 0) setAresDistributions(vizs) }
+          if (vizs.length > 0) setAresDistributions(vizs)
         }
       } catch (err: any) { console.error('Error loading distributions:', err) }
       finally { setDistributionsLoading(false) }
     }
     loadDistributions()
-  }, [ingestionComplete, datasetName, environment, selectedAxes, analysisView])
+  }, [ingestionComplete, datasetName, environment, selectedAxes])
 
   // ── Ingestion status polling ──
   // When navigating to a task, try to load data. If the backend returns 500
@@ -417,7 +410,7 @@ export default function DatasetPage() {
             {/* Tab Content */}
             {!loading && (
               <div className="p-6">
-                {activeTab === 'overview' && <OverviewTab datasetName={datasetName} datasetInfo={datasetInfo} aresDistributions={aresDistributions} distributionsLoading={distributionsLoading} hasNoData={hasNoData} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} customAugmentationText={customAugmentationText} setCustomAugmentationText={setCustomAugmentationText} />}
+                {activeTab === 'overview' && <OverviewTab datasetName={datasetName} datasetInfo={datasetInfo} aresDistributions={aresDistributions} newDistributions={newDistributions} datasetData={datasetData} distributionsLoading={distributionsLoading} hasNoData={hasNoData} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} customAugmentationText={customAugmentationText} setCustomAugmentationText={setCustomAugmentationText} />}
                 {activeTab === 'actions' && <ActionsTab datasetName={datasetName} datasetData={datasetData} onAugmentationComplete={handleAugmentationComplete} uploadMode={uploadMode} setUploadMode={setUploadMode} uploadedFiles={uploadedFiles} datasetPath={datasetPath} handleFolderSelect={handleFolderSelect} s3AccessKey={s3AccessKey} setS3AccessKey={setS3AccessKey} s3SecretKey={s3SecretKey} setS3SecretKey={setS3SecretKey} s3Bucket={s3Bucket} setS3Bucket={setS3Bucket} s3Region={s3Region} setS3Region={setS3Region} s3UserPath={s3UserPath} setS3UserPath={setS3UserPath} hfRepoId={hfRepoId} setHfRepoId={setHfRepoId} hfSplit={hfSplit} setHfSplit={setHfSplit} hfToken={hfToken} setHfToken={setHfToken} handleLoadDataset={handleLoadDataset} uploadLoading={uploadLoading} uploadSuccess={uploadSuccess} setDatasetPath={setDatasetPath} setDatasetName={setDatasetNameInput} selectedAxes={selectedAxes} setSelectedAxes={setSelectedAxes} customAugmentationText={customAugmentationText} setCustomAugmentationText={setCustomAugmentationText} />}
                 {activeTab === 'history' && <HistoryTab />}
               </div>

@@ -23,25 +23,20 @@ interface DatasetDistributionsProps {
   loading?: boolean
 }
 
-type EnvironmentSubTab = 'objects' | 'lighting' | 'materials'
+type EnvironmentSubTab = string
 
 export default function DatasetDistributions({
-  datasetName,
-  isCurated = false,
   aresDistributions = [],
   loading = false
 }: DatasetDistributionsProps) {
-  const [activeEnvSubTab, setActiveEnvSubTab] = useState<EnvironmentSubTab>('objects')
+  const [activeEnvSubTab, setActiveEnvSubTab] = useState<EnvironmentSubTab>('')
 
   // Auto-select first available tab when distributions load
   useEffect(() => {
     if (aresDistributions.length > 0) {
-      const currentTabExists = aresDistributions.some(
-        dist => dist.title.toLowerCase().replace(/\s+/g, '-') === activeEnvSubTab
-      )
-      if (!currentTabExists) {
-        const firstTabKey = aresDistributions[0].title.toLowerCase().replace(/\s+/g, '-')
-        setActiveEnvSubTab(firstTabKey as EnvironmentSubTab)
+      const tabKeys = aresDistributions.map(dist => dist.title.toLowerCase().replace(/\s+/g, '-'))
+      if (!activeEnvSubTab || !tabKeys.includes(activeEnvSubTab)) {
+        setActiveEnvSubTab(tabKeys[0])
       }
     }
   }, [aresDistributions, activeEnvSubTab])
@@ -50,7 +45,7 @@ export default function DatasetDistributions({
     <div>
       <h2 className="text-xs font-medium mb-3 text-white">Dataset Distribution</h2>
       <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3">
-        {/* Sub-tabs */}
+        {/* Sub-tabs - show all available distributions */}
         {aresDistributions.length > 0 && (
           <div className="flex gap-0 mb-3 border-b border-white/10">
             {aresDistributions.map((dist, idx) => {
@@ -58,10 +53,10 @@ export default function DatasetDistributions({
               return (
                 <button
                   key={idx}
-                  onClick={() => setActiveEnvSubTab(tabKey as EnvironmentSubTab)}
+                  onClick={() => setActiveEnvSubTab(tabKey)}
                   className={`px-3 py-1.5 text-xs font-medium transition-colors relative ${activeEnvSubTab === tabKey
-                      ? 'text-white'
-                      : 'text-white/40 hover:text-white'
+                    ? 'text-white'
+                    : 'text-white/40 hover:text-white'
                     }`}
                 >
                   {dist.title}
@@ -84,7 +79,7 @@ export default function DatasetDistributions({
             <div className="p-4">
               {aresDistributions.map((dist, idx) => {
                 const tabKey = dist.title.toLowerCase().replace(/\s+/g, '-')
-                const shouldShow = !activeEnvSubTab || activeEnvSubTab === tabKey
+                const shouldShow = activeEnvSubTab === tabKey
                 return shouldShow && dist.figure ? (
                   <Plot
                     key={idx}

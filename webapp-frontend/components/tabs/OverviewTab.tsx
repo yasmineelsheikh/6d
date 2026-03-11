@@ -9,6 +9,8 @@ interface OverviewTabProps {
     datasetName: string
     datasetInfo: any
     aresDistributions: any[]
+    newDistributions?: any[]
+    datasetData: any[]
     distributionsLoading: boolean
     hasNoData?: boolean
     // Upload props for fallback
@@ -39,7 +41,8 @@ interface OverviewTabProps {
 
 export default function OverviewTab(props: OverviewTabProps) {
     const {
-        datasetName, datasetInfo, aresDistributions, distributionsLoading, hasNoData
+        datasetName, datasetInfo, aresDistributions, newDistributions, datasetData, distributionsLoading,
+        hasNoData
     } = props
 
     // No data state — show upload prompt

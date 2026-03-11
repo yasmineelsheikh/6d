@@ -36,7 +36,7 @@ interface ActionsTabProps {
 }
 
 function AccordionPanel({ title, statusText, children }: {
-    title: string; statusText: string; children: React.ReactNode
+    title: string; statusText: string; children?: React.ReactNode
 }) {
     const [isOpen, setIsOpen] = useState(false)
     return (
@@ -245,6 +245,9 @@ export default function ActionsTab(props: ActionsTabProps) {
 
             {/* Data Explorer */}
             <AccordionPanel title="Data Explorer" statusText={`${props.datasetData.length} episodes`}>
+                <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+                    <p className="text-white/40 text-xs text-center">Use the Overview tab to preview episodes.</p>
+                </div>
             </AccordionPanel>
         </div>
     )
