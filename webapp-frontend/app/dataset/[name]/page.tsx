@@ -150,10 +150,107 @@ export default function DatasetPage() {
   }
 
   const handleLoadDataset = async () => {
-    // Placeholder — the full upload logic from the original is preserved in page.tsx
-    // This is a simplified version for the Actions tab upload
-    setUploadLoading(true); setUploadSuccess(false)
-    setTimeout(() => { setUploadLoading(false); setUploadSuccess(true) }, 1500)
+    if (uploadMode === 'local' && !uploadedFiles) return
+    if (uploadMode === 's3' && (!s3AccessKey || !s3SecretKey || !s3Bucket || !s3UserPath)) return
+    if (uploadMode === 'huggingface' && (!hfRepoId)) return
+
+    // Auto-generate dataset name if not set
+    let finalDatasetName = datasetNameInput || datasetName
+    if (!finalDatasetName) {
+      if (uploadMode === 'local' && uploadedFiles) {
+        const firstFile = uploadedFiles[0]
+        const relativePath = (firstFile as any).webkitRelativePath || firstFile.name
+        finalDatasetName = relativePath.split('/')[0]
+      } else if (uploadMode === 's3' && s3UserPath) {
+        const pathParts = s3UserPath.split('/').filter(p => p)
+        finalDatasetName = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2] || 'dataset'
+      } else if (uploadMode === 'huggingface' && hfRepoId) {
+        finalDatasetName = hfRepoId.split('/').pop() || 'dataset'
+      } else {
+        return
+      }
+    }
+
+    setUploadLoading(true)
+    setUploadSuccess(false)
+    setError(null)
+
+    try {
+      let response: Response
+
+      if (uploadMode === 'local') {
+        const formData = new FormData()
+        if (uploadedFiles) {
+          Array.from(uploadedFiles).forEach((file) => {
+            const relativePath = (file as any).webkitRelativePath || file.name
+            formData.append('files', file, relativePath)
+          })
+        }
+        formData.append('dataset_name', finalDatasetName)
+        formData.append('environment', environment || '')
+        formData.append('axes', JSON.stringify(selectedAxes.length > 0 ? selectedAxes : []))
+
+        response = await fetch(`${API_BASE}/api/datasets/upload`, {
+          method: 'POST',
+          body: formData,
+        })
+      } else if (uploadMode === 's3') {
+        response = await fetch(`${API_BASE}/api/datasets/upload-s3`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dataset_name: finalDatasetName,
+            s3_access_key: s3AccessKey,
+            s3_secret_key: s3SecretKey,
+            s3_bucket: s3Bucket,
+            s3_region: s3Region,
+            s3_path: s3UserPath,
+            environment: environment || '',
+            axes: selectedAxes.length > 0 ? selectedAxes : null,
+          }),
+        })
+      } else if (uploadMode === 'huggingface') {
+        response = await fetch(`${API_BASE}/api/datasets/upload-huggingface`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dataset_name: finalDatasetName,
+            hf_repo_id: hfRepoId,
+            hf_split: hfSplit,
+            hf_token: hfToken || null,
+            environment: environment || '',
+            axes: selectedAxes.length > 0 ? selectedAxes : null,
+          }),
+        })
+      } else {
+        throw new Error('Invalid upload mode')
+      }
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to load dataset'
+        try {
+          const contentType = response.headers.get('content-type')
+          if (contentType && contentType.includes('application/json')) {
+            const err = await response.json()
+            errorMessage = err.detail || err.message || errorMessage
+          } else {
+            const text = await response.text()
+            errorMessage = text || errorMessage
+          }
+        } catch {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`
+        }
+        throw new Error(errorMessage)
+      }
+
+      // Upload successful — navigate to the dataset page to trigger ingestion polling
+      setUploadSuccess(true)
+      setUploadLoading(false)
+      router.push(`/dataset/${encodeURIComponent(finalDatasetName)}`)
+    } catch (err: any) {
+      setError(err.message)
+      setUploadLoading(false)
+    }
   }
 
   // ── Distribution loading ──
@@ -291,15 +388,7 @@ export default function DatasetPage() {
         </div>
       </header>
 
-      <div className="flex min-h-[calc(100vh-40px)]">
-        {/* ── Left Panel ── */}
-        <aside className="w-[260px] flex-shrink-0 bg-[#1e1e1e] border-r border-[#2a2a2a] p-5 space-y-6 overflow-y-auto">
-          <div>
-            <h2 className="text-lg font-light text-white">{decodeURIComponent(datasetName)}</h2>
-            {datasetInfo?.robot_type && <p className="text-[11px] text-white/40 mt-1">{datasetInfo.robot_type}</p>}
-          </div>
-        </aside>
-
+      <div className="min-h-[calc(100vh-40px)]">
         {/* ── Main Content ── */}
         <main className="flex-1 flex flex-col min-h-0">
           {/* Tabs */}
