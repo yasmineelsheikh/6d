@@ -33,10 +33,14 @@ interface ActionsTabProps {
     setSelectedAxes: (v: string[]) => void
     customAugmentationText: string
     setCustomAugmentationText: (v: string) => void
+    isIndoor: boolean
+    setIsIndoor: (v: boolean) => void
+    isOutdoor: boolean
+    setIsOutdoor: (v: boolean) => void
 }
 
-function AccordionPanel({ title, statusText, children }: {
-    title: string; statusText: string; children?: React.ReactNode
+function AccordionPanel({ title, children }: {
+    title: string; children?: React.ReactNode
 }) {
     const [isOpen, setIsOpen] = useState(false)
     return (
@@ -48,7 +52,6 @@ function AccordionPanel({ title, statusText, children }: {
             >
                 {isOpen ? <ChevronDown className="w-3.5 h-3.5 text-white/40 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />}
                 <span className="text-xs font-medium text-white flex-1">{title}</span>
-                <span className="text-[11px] text-white/40">{statusText}</span>
             </button>
             {isOpen && (
                 <div className="px-6 pb-6 pt-4 border-t border-white/5">
@@ -59,7 +62,8 @@ function AccordionPanel({ title, statusText, children }: {
     )
 }
 
-const ALL_AXES = ['Objects', 'Lighting', 'Color/Material', 'Weather', 'Road Surface']
+const INDOOR_AXES = ['Objects', 'Lighting', 'Color/Material']
+const OUTDOOR_AXES = ['Objects', 'Lighting', 'Weather', 'Road Surface']
 
 const inputClass = "px-3 py-2.5 bg-[#1a1a1a] border border-white/10 text-white placeholder:text-white/30 text-xs rounded-xl focus:outline-none focus:border-white/20 transition-colors"
 
@@ -77,7 +81,7 @@ export default function ActionsTab(props: ActionsTabProps) {
     return (
         <div className="space-y-3">
             {/* Augmentation */}
-            <AccordionPanel title="Augmentation" statusText="Ready">
+            <AccordionPanel title="Augmentation">
                 <AugmentationPanel datasetName={props.datasetName} onComplete={props.onAugmentationComplete} />
 
                 {/* Augmentation Settings */}
@@ -88,7 +92,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                     <div>
                         <span className="text-[10px] uppercase tracking-widest text-white/30 font-medium">Axes</span>
                         <div className="mt-3 flex flex-wrap gap-2">
-                            {ALL_AXES.map(axis => (
+                            {(props.isOutdoor ? OUTDOOR_AXES : INDOOR_AXES).map(axis => (
                                 <button key={axis} type="button" onClick={() => toggleAxis(axis)}
                                     className={`px-4 py-2 text-xs rounded-xl border transition-all ${props.selectedAxes.includes(axis)
                                         ? 'bg-white/10 border-white/30 text-white shadow-lg shadow-white/5'
@@ -119,15 +123,16 @@ export default function ActionsTab(props: ActionsTabProps) {
             </AccordionPanel>
 
             {/* Optimisation */}
-            <AccordionPanel title="Optimisation" statusText="Coming Soon">
+            <AccordionPanel title="Optimisation">
                 <div className="opacity-60 pointer-events-none">
                     <OptimizationPanel datasetName={props.datasetName} />
                 </div>
             </AccordionPanel>
 
             {/* Add Data */}
-            <AccordionPanel title="Add Data" statusText="Ready">
-                <div className="space-y-4">
+            <AccordionPanel title="Add Data">
+                <div className="space-y-6">
+                    {/* Mode Toggle */}
                     <div className="flex items-center gap-1.5 border border-white/10 rounded-xl p-1 bg-[#1a1a1a] w-fit">
                         {(['local', 's3', 'huggingface'] as const).map((mode) => (
                             <button key={mode} type="button"
@@ -138,6 +143,37 @@ export default function ActionsTab(props: ActionsTabProps) {
                                 {mode === 'local' ? 'Local' : mode === 's3' ? 'S3' : 'HF'}
                             </button>
                         ))}
+                    </div>
+
+                    {/* Environment Selection */}
+                    <div className="pt-2">
+                        <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Environment</span>
+                        <div className="mt-2 flex gap-2 w-fit">
+                            <button type="button" onClick={() => { props.setIsIndoor(true); props.setIsOutdoor(false) }}
+                                className={`px-5 py-2 text-xs rounded-xl border transition-all ${props.isIndoor ? 'bg-white/10 border-white/30 text-white' : 'bg-transparent border-white/10 text-white/40 hover:text-white'}`}>
+                                Indoor
+                            </button>
+                            <button type="button" onClick={() => { props.setIsIndoor(false); props.setIsOutdoor(true) }}
+                                className={`px-5 py-2 text-xs rounded-xl border transition-all ${props.isOutdoor ? 'bg-white/10 border-white/30 text-white' : 'bg-transparent border-white/10 text-white/40 hover:text-white'}`}>
+                                Outdoor
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Axes Selection */}
+                    <div className="pt-2">
+                        <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Axes</span>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            {(props.isOutdoor ? OUTDOOR_AXES : INDOOR_AXES).map(axis => (
+                                <button key={axis} type="button" onClick={() => toggleAxis(axis)}
+                                    className={`px-4 py-2 text-xs rounded-xl border transition-all ${props.selectedAxes.includes(axis)
+                                        ? 'bg-white/10 border-white/30 text-white shadow-lg shadow-white/5'
+                                        : 'bg-transparent border-white/10 text-white/40 hover:text-white hover:border-white/20'
+                                        }`}>
+                                    {axis}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     {props.uploadMode === 'local' && (
@@ -185,8 +221,9 @@ export default function ActionsTab(props: ActionsTabProps) {
             </AccordionPanel>
 
             {/* Import Test Runs */}
-            <AccordionPanel title="Import Test Runs" statusText="Ready">
-                <div className="space-y-4">
+            <AccordionPanel title="Import Test Runs">
+                <div className="space-y-6">
+                    {/* Mode Toggle */}
                     <div className="flex items-center gap-1.5 border border-white/10 rounded-xl p-1 bg-[#1a1a1a] w-fit">
                         {(['local', 's3', 'huggingface'] as const).map((mode) => (
                             <button key={mode} type="button"
@@ -197,6 +234,37 @@ export default function ActionsTab(props: ActionsTabProps) {
                                 {mode === 'local' ? 'Local' : mode === 's3' ? 'S3' : 'HF'}
                             </button>
                         ))}
+                    </div>
+
+                    {/* Environment Selection */}
+                    <div className="pt-2">
+                        <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Environment</span>
+                        <div className="mt-2 flex gap-2 w-fit">
+                            <button type="button" onClick={() => { props.setIsIndoor(true); props.setIsOutdoor(false) }}
+                                className={`px-5 py-2 text-xs rounded-xl border transition-all ${props.isIndoor ? 'bg-white/10 border-white/30 text-white' : 'bg-transparent border-white/10 text-white/40 hover:text-white'}`}>
+                                Indoor
+                            </button>
+                            <button type="button" onClick={() => { props.setIsIndoor(false); props.setIsOutdoor(true) }}
+                                className={`px-5 py-2 text-xs rounded-xl border transition-all ${props.isOutdoor ? 'bg-white/10 border-white/30 text-white' : 'bg-transparent border-white/10 text-white/40 hover:text-white'}`}>
+                                Outdoor
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Axes Selection */}
+                    <div className="pt-2">
+                        <span className="text-[10px] uppercase tracking-widest text-white/40 font-medium">Axes</span>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            {(props.isOutdoor ? OUTDOOR_AXES : INDOOR_AXES).map(axis => (
+                                <button key={axis} type="button" onClick={() => toggleAxis(axis)}
+                                    className={`px-4 py-2 text-xs rounded-xl border transition-all ${props.selectedAxes.includes(axis)
+                                        ? 'bg-white/10 border-white/30 text-white shadow-lg shadow-white/5'
+                                        : 'bg-transparent border-white/10 text-white/40 hover:text-white hover:border-white/20'
+                                        }`}>
+                                    {axis}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     {props.uploadMode === 'local' && (
@@ -243,12 +311,7 @@ export default function ActionsTab(props: ActionsTabProps) {
                 </div>
             </AccordionPanel>
 
-            {/* Data Explorer */}
-            <AccordionPanel title="Data Explorer" statusText={`${props.datasetData.length} episodes`}>
-                <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-                    <p className="text-white/40 text-xs text-center">Use the Overview tab to preview episodes.</p>
-                </div>
-            </AccordionPanel>
+
         </div>
     )
 }

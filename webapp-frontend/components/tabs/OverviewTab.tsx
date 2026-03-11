@@ -37,6 +37,10 @@ interface OverviewTabProps {
     setSelectedAxes?: (v: string[]) => void
     customAugmentationText?: string
     setCustomAugmentationText?: (v: string) => void
+    isIndoor?: boolean
+    setIsIndoor?: (v: boolean) => void
+    isOutdoor?: boolean
+    setIsOutdoor?: (v: boolean) => void
 }
 
 export default function OverviewTab(props: OverviewTabProps) {
@@ -117,13 +121,30 @@ export default function OverviewTab(props: OverviewTabProps) {
                             <Upload className="w-3.5 h-3.5" />
                             {props.uploadLoading ? 'Uploading...' : 'Upload Dataset'}
                         </button>
+
+                        {/* Environment Selection */}
+                        <div className="pt-2">
+                            <span className="text-[10px] uppercase tracking-widest text-white/20 font-medium">Environment</span>
+                            <div className="mt-2 flex gap-2">
+                                <button type="button" onClick={() => { props.setIsIndoor?.(true); props.setIsOutdoor?.(false) }}
+                                    className={`flex-1 py-2.5 text-xs rounded-xl border transition-all ${props.isIndoor ? 'bg-white/10 border-white/20 text-white' : 'bg-[#1a1a1a] border-white/5 text-white/20 hover:text-white/40'}`}>
+                                    Indoor
+                                </button>
+                                <button type="button" onClick={() => { props.setIsIndoor?.(false); props.setIsOutdoor?.(true) }}
+                                    className={`flex-1 py-2.5 text-xs rounded-xl border transition-all ${props.isOutdoor ? 'bg-white/10 border-white/20 text-white' : 'bg-[#1a1a1a] border-white/5 text-white/20 hover:text-white/40'}`}>
+                                    Outdoor
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Axes — subtle settings */}
                     <div className="w-full max-w-lg mt-6 pt-5 border-t border-white/5">
                         <span className="text-[10px] uppercase tracking-widest text-white/20 font-medium">Axes</span>
                         {(() => {
-                            const ALL_AXES = ['Objects', 'Lighting', 'Color/Material', 'Weather', 'Road Surface']
+                            const INDOOR_AXES = ['Objects', 'Lighting', 'Color/Material']
+                            const OUTDOOR_AXES = ['Objects', 'Lighting', 'Weather', 'Road Surface']
+                            const ALL_AXES = props.isOutdoor ? OUTDOOR_AXES : INDOOR_AXES
                             const toggleAxis = (axis: string) => {
                                 const current = props.selectedAxes || []
                                 props.setSelectedAxes?.(current.includes(axis) ? current.filter(a => a !== axis) : [...current, axis])
