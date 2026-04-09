@@ -636,9 +636,7 @@ export default function DemoPage() {
                     <div>
                       <div className="text-sm font-medium text-gray-800 flex items-center gap-2">
                         {mode === 'check-only' ? 'Check only' : 'Check and fix'}
-                        {mode === 'check-and-fix' && (
-                          <span className="text-xs text-indigo-600 font-normal">Recommended</span>
-                        )}
+                        {mode === 'check-and-fix'}
                       </div>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {mode === 'check-only'
