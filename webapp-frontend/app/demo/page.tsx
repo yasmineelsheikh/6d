@@ -10,9 +10,8 @@ import {
 
 type DataSource = 'collect' | 'upload'
 type DataType = 'Teleoperation' | 'Motion Capture' | 'Egocentric'
-type Hours = '10–100 hrs' | '100–1000 hrs' | '1000+ hrs'
 type UploadMethod = 'connect' | 'files'
-type StorageProvider = 'AWS S3' | 'GCP' | 'Azure'
+type StorageProvider = 'AWS S3'
 type QualityMode = 'check-only' | 'check-and-fix'
 type AugGoal = 'More diversity' | 'New objects' | 'New environments' | 'More volume'
 type AnnotationType = '3D scene reconstruction' | 'Hand pose tracking' | 'Point tracking' | 'Object 6DoF pose'
@@ -73,25 +72,6 @@ function Chips<T extends string>({
   )
 }
 
-function HoursSelector({ value, onChange }: { value: Hours | null; onChange: (v: Hours) => void }) {
-  const opts: Hours[] = ['10–100 hrs', '100–1000 hrs', '1000+ hrs']
-  return (
-    <div className="flex gap-2">
-      {opts.map(h => (
-        <button
-          key={h}
-          onClick={() => onChange(h)}
-          className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${value === h
-            ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-            }`}
-        >
-          {h}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
   return (
@@ -302,7 +282,7 @@ export default function DemoPage() {
   // Section 3 — Augmentation
   const [augEnabled, setAugEnabled] = useState(false)
   const [augGoals, setAugGoals] = useState<AugGoal[]>([])
-  const [augHours, setAugHours] = useState<Hours | null>(null)
+  const [augMultiplier, setAugMultiplier] = useState<string | null>(null)
 
   // Section 4 — Quality
   const [qualityEnabled, setQualityEnabled] = useState(false)
@@ -368,7 +348,7 @@ export default function DemoPage() {
         name: 'Augmentation',
         description: [
           augGoals.length > 0 && augGoals.join(', '),
-          augHours && `+${augHours}`,
+          augMultiplier && `${augMultiplier}× existing volume`,
         ].filter(Boolean).join(' · ') || 'Scaling dataset with synthetic augmentation',
         icon: Sparkles,
       })
@@ -429,7 +409,7 @@ export default function DemoPage() {
     ]),
     ...(augEnabled ? [
       { label: 'Augmentation', value: augGoals.length > 0 ? augGoals.join(', ') : 'Enabled' },
-      ...(augHours ? [{ label: 'Aug volume', value: augHours }] : []),
+      ...(augMultiplier ? [{ label: 'Scale', value: `${augMultiplier}× existing data` }] : []),
     ] : []),
     ...(qualityEnabled ? [
       { label: 'Quality', value: qualityMode === 'check-only' ? 'Check only' : 'Check and fix' },
@@ -597,19 +577,16 @@ export default function DemoPage() {
                         Storage Provider
                       </label>
                       <div className="flex gap-2">
-                        {(['AWS S3', 'GCP', 'Azure'] as StorageProvider[]).map(p => (
-                          <button
-                            key={p}
-                            onClick={() => setStorageProvider(p)}
-                            className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${
-                              storageProvider === p
-                                ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        ))}
+                        <button
+                          onClick={() => setStorageProvider('AWS S3')}
+                          className={`px-4 py-2 rounded-lg text-sm border font-medium transition-all ${
+                            storageProvider === 'AWS S3'
+                              ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                          }`}
+                        >
+                          AWS S3
+                        </button>
                       </div>
                     </div>
                     <div>
@@ -715,9 +692,23 @@ export default function DemoPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
-                    Additional Volume
+                    Scale Factor
                   </label>
-                  <HoursSelector value={augHours} onChange={setAugHours} />
+                  <div className="flex gap-2">
+                    {['2×', '5×', '10×', '20×'].map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setAugMultiplier(m.replace('×', ''))}
+                        className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${
+                          augMultiplier === m.replace('×', '')
+                            ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </OptionalSection>
