@@ -170,7 +170,6 @@ function OptionalSection({
         </div>
         <div className="flex-1 min-w-0">
           <span className="font-medium text-sm text-gray-700">{title}</span>
-          <span className="text-xs text-gray-400 ml-2">optional</span>
           {description && !enabled && (
             <p className="text-xs text-gray-400 mt-0.5">{description}</p>
           )}
