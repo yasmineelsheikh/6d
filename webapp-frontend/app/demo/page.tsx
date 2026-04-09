@@ -458,7 +458,7 @@ export default function DemoPage() {
         >
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              {([
+              {[
                 {
                   value: 'collect' as DataSource,
                   icon: Bot,
@@ -469,7 +469,7 @@ export default function DemoPage() {
                   icon: Upload,
                   title: 'Upload',
                 },
-              ] as const).map(({ value, icon: Icon, title, desc }) => (
+              ].map(({ value, icon: Icon, title }) => (
                 <button
                   key={value}
                   onClick={() => setDataSource(value)}
@@ -482,7 +482,6 @@ export default function DemoPage() {
                   <div className={`font-semibold text-sm ${dataSource === value ? 'text-indigo-700' : 'text-gray-800'}`}>
                     {title}
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5 leading-relaxed">{desc}</div>
                 </button>
               ))}
             </div>
