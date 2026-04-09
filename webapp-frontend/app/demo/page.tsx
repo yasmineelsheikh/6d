@@ -4,6 +4,7 @@ import { useState } from 'react'
 import {
   Bot, Upload, Sparkles, ShieldCheck, Tag, Package,
   Check, Eye, HardDrive, FolderOpen, X,
+  LayoutDashboard, FilePlus, History, Settings, LogOut, Menu,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -165,13 +166,91 @@ function OptionalSection({
   )
 }
 
+// ─── Header + Sidebar ────────────────────────────────────────────────────────
+
+function Header({ active }: { active: 'request' | 'pipeline' }) {
+  const [open, setOpen] = useState(false)
+
+  const nav = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'request', label: 'New Request', icon: FilePlus },
+    { id: 'pipeline', label: 'Pipeline', icon: History },
+    { id: 'settings', label: 'Settings', icon: Settings },
+  ]
+
+  return (
+    <>
+      <header className="bg-white border-b border-gray-200 px-6 flex-shrink-0 flex items-center h-14">
+        <a href="/" className="flex items-center gap-2.5 hover:opacity-75 transition-opacity">
+          <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
+            <span className="text-white text-xs font-bold">6d</span>
+          </div>
+          <span className="text-gray-900 font-semibold text-sm">6d labs</span>
+        </a>
+        <button
+          onClick={() => setOpen(p => !p)}
+          className="ml-auto p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition-colors"
+        >
+          {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+      </header>
+
+      {/* Backdrop */}
+      {open && (
+        <div
+          className="fixed inset-0 z-20"
+          onClick={() => setOpen(false)}
+        />
+      )}
+
+      {/* Drawer */}
+      <div className={`fixed top-14 right-0 h-[calc(100vh-3.5rem)] w-60 bg-white border-l border-gray-200 flex flex-col z-30 transition-transform duration-200 ${open ? 'translate-x-0' : 'translate-x-full'}`}>
+        <nav className="flex-1 px-3 py-4 space-y-0.5">
+          {nav.map(({ id, label, icon: Icon }) => {
+            const isActive = id === active
+            return (
+              <button
+                key={id}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left ${
+                  isActive
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                }`}
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                {label}
+              </button>
+            )
+          })}
+        </nav>
+
+        <div className="px-3 py-4 border-t border-gray-100">
+          <div className="flex items-center gap-2.5 px-3 py-2 mb-0.5">
+            <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-semibold text-indigo-600 flex-shrink-0">
+              J
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-gray-800 truncate">Jane Smith</p>
+              <p className="text-xs text-gray-400 truncate">jane@acme.ai</p>
+            </div>
+          </div>
+          <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition-colors">
+            <LogOut className="w-4 h-4 flex-shrink-0" />
+            Log out
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ─── Pipeline Screen ──────────────────────────────────────────────────────────
 
 function PipelineScreen({ stages, onBack }: { stages: Stage[]; onBack: () => void }) {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
-      <main className="max-w-2xl mx-auto px-6 py-10">
+    <div className="flex flex-col min-h-screen bg-gray-50">
+      <Header active="pipeline" />
+      <main className="flex-1 max-w-2xl px-10 py-10">
         <div className="mb-8">
           <button
             onClick={onBack}
@@ -237,24 +316,6 @@ function PipelineScreen({ stages, onBack }: { stages: Stage[]; onBack: () => voi
         </p>
       </main>
     </div>
-  )
-}
-
-// ─── Header ───────────────────────────────────────────────────────────────────
-
-function Header() {
-  return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4">
-      <div className="flex items-center gap-3">
-        <a href="/" className="flex items-center gap-3 hover:opacity-75 transition-opacity">
-          <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
-            <span className="text-white text-xs font-bold">6d</span>
-          </div>
-          <span className="text-gray-900 font-semibold text-sm">6d labs</span>
-        </a>
-        <span className="text-gray-300 mx-0.5">·</span>
-      </div>
-    </header>
   )
 }
 
@@ -433,10 +494,9 @@ export default function DemoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
-
-      <main className="max-w-2xl mx-auto px-6 py-10 space-y-3">
+    <div className="flex flex-col min-h-screen bg-gray-50">
+      <Header active="request" />
+      <main className="flex-1 max-w-2xl px-10 py-10 space-y-3">
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-gray-900">New Request</h1>
         </div>
