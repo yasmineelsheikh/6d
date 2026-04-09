@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import {
   Bot, Upload, Sparkles, ShieldCheck, Tag, Package,
-  Check, Eye,
+  Check, Eye, HardDrive, FolderOpen, X,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -11,7 +11,8 @@ import {
 type DataSource = 'collect' | 'upload'
 type DataType = 'Teleoperation' | 'Motion Capture' | 'Egocentric'
 type Hours = '10–100 hrs' | '100–1000 hrs' | '1000+ hrs'
-type DataFormat = 'HDF5' | 'MP4+JSON' | 'ROS Bag'
+type UploadMethod = 'connect' | 'files'
+type StorageProvider = 'AWS S3' | 'GCP' | 'Azure'
 type QualityMode = 'check-only' | 'check-and-fix'
 type AugGoal = 'More diversity' | 'New objects' | 'New environments' | 'More volume'
 type AnnotationType = '3D scene reconstruction' | 'Hand pose tracking' | 'Point tracking' | 'Object 6DoF pose'
@@ -291,8 +292,11 @@ export default function DemoPage() {
   const [additionalSpecs, setAdditionalSpecs] = useState('')
 
   // Section 2 — Upload
-  const [datasetId, setDatasetId] = useState('')
-  const [dataFormat, setDataFormat] = useState<DataFormat | null>(null)
+  const [uploadMethod, setUploadMethod] = useState<UploadMethod | null>(null)
+  const [storageProvider, setStorageProvider] = useState<StorageProvider | null>(null)
+  const [bucketPath, setBucketPath] = useState('')
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [dragOver, setDragOver] = useState(false)
   const [s2Done, setS2Done] = useState(false)
 
   // Section 3 — Augmentation
@@ -321,13 +325,19 @@ export default function DemoPage() {
 
   const s2Valid = dataSource === 'collect'
     ? (dataTypes.length > 0 && targetHours !== '')
-    : (dataFormat !== null)
+    : uploadMethod === 'connect'
+      ? (storageProvider !== null && bucketPath.trim() !== '')
+      : uploadMethod === 'files'
+        ? uploadedFiles.length > 0
+        : false
 
   const s1Summary = dataSource === 'collect' ? 'Collect new data' : 'Upload existing data'
 
   const s2Summary = dataSource === 'collect'
     ? [dataTypes.join(', '), targetHours ? `${targetHours} hrs` : null].filter(Boolean).join(' · ')
-    : [dataFormat, datasetId ? `"${datasetId}"` : null].filter(Boolean).join(' · ')
+    : uploadMethod === 'connect'
+      ? [storageProvider, bucketPath].filter(Boolean).join(' · ')
+      : `${uploadedFiles.length} file${uploadedFiles.length !== 1 ? 's' : ''}`
 
   function getPipelineStages(): Stage[] {
     const raw: Omit<Stage, 'status'>[] = []
@@ -343,7 +353,11 @@ export default function DemoPage() {
       raw.push({
         id: 'ingestion',
         name: 'Ingestion',
-        description: [dataFormat && `${dataFormat} format`, datasetId && `Dataset: ${datasetId}`].filter(Boolean).join(' · ') || 'Processing uploaded dataset',
+        description: uploadMethod === 'connect'
+          ? [storageProvider, bucketPath].filter(Boolean).join(' · ') || 'Cloud storage ingestion'
+          : uploadedFiles.length > 0
+            ? `${uploadedFiles.length} file${uploadedFiles.length !== 1 ? 's' : ''} uploaded`
+            : 'Processing uploaded dataset',
         icon: Upload,
       })
     }
@@ -405,8 +419,13 @@ export default function DemoPage() {
       { label: 'Target Hours', value: targetHours ? `${targetHours} hrs` : '—' },
       ...(additionalSpecs ? [{ label: 'Details', value: additionalSpecs }] : []),
     ] : [
-      { label: 'Format', value: dataFormat ?? '—' },
-      ...(datasetId ? [{ label: 'Dataset ID', value: datasetId }] : []),
+      { label: 'Method', value: uploadMethod === 'connect' ? 'Connect Storage' : 'Upload Files' },
+      ...(uploadMethod === 'connect' ? [
+        { label: 'Provider', value: storageProvider ?? '—' },
+        ...(bucketPath ? [{ label: 'Path', value: bucketPath }] : []),
+      ] : [
+        { label: 'Files', value: `${uploadedFiles.length} file${uploadedFiles.length !== 1 ? 's' : ''}` },
+      ]),
     ]),
     ...(augEnabled ? [
       { label: 'Augmentation', value: augGoals.length > 0 ? augGoals.join(', ') : 'Enabled' },
@@ -547,23 +566,118 @@ export default function DemoPage() {
                 )}
               </div>
             ) : (
-              <div className="space-y-5">
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
-                    Upload Dataset
-                  </label>
-                  <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-gray-300 transition-colors">
-                    <Upload className="w-5 h-5 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm text-gray-400 mb-3">Upload dataset or paste dataset ID</p>
-                    <input
-                      type="text"
-                      placeholder="dataset-xxxxxxxx"
-                      value={datasetId}
-                      onChange={e => setDatasetId(e.target.value)}
-                      className="w-full max-w-xs mx-auto block text-sm border border-gray-200 rounded-lg px-3 py-2 text-center text-gray-700 bg-white focus:outline-none focus:border-indigo-300"
-                    />
-                  </div>
+              <div className="space-y-4">
+                {/* Method selector */}
+                <div className="grid grid-cols-2 gap-3">
+                  {([
+                    { value: 'connect' as UploadMethod, icon: HardDrive, label: 'Connect Storage', desc: 'Point to data in your cloud bucket' },
+                    { value: 'files' as UploadMethod, icon: FolderOpen, label: 'Upload Files', desc: 'Drag and drop files directly' },
+                  ]).map(({ value, icon: Icon, label, desc }) => (
+                    <button
+                      key={value}
+                      onClick={() => setUploadMethod(value)}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${
+                        uploadMethod === value
+                          ? 'border-indigo-400 bg-indigo-50'
+                          : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
+                    >
+                      <Icon className={`w-5 h-5 mb-2.5 ${uploadMethod === value ? 'text-indigo-600' : 'text-gray-400'}`} />
+                      <div className={`font-semibold text-sm ${uploadMethod === value ? 'text-indigo-700' : 'text-gray-800'}`}>{label}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
+                    </button>
+                  ))}
                 </div>
+
+                {/* Connect Storage fields */}
+                {uploadMethod === 'connect' && (
+                  <div className="space-y-4 pt-1">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
+                        Storage Provider
+                      </label>
+                      <div className="flex gap-2">
+                        {(['AWS S3', 'GCP', 'Azure'] as StorageProvider[]).map(p => (
+                          <button
+                            key={p}
+                            onClick={() => setStorageProvider(p)}
+                            className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${
+                              storageProvider === p
+                                ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
+                        Bucket / Path
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. s3://my-bucket/collections/run-42"
+                        value={bucketPath}
+                        onChange={e => setBucketPath(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:border-indigo-300 font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Upload Files drop zone */}
+                {uploadMethod === 'files' && (
+                  <div className="pt-1">
+                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
+                      Files
+                    </label>
+                    <div
+                      onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={e => {
+                        e.preventDefault()
+                        setDragOver(false)
+                        setUploadedFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)])
+                      }}
+                      onClick={() => document.getElementById('file-input')?.click()}
+                      className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                        dragOver
+                          ? 'border-indigo-400 bg-indigo-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <Upload className={`w-5 h-5 mx-auto mb-2 ${dragOver ? 'text-indigo-400' : 'text-gray-300'}`} />
+                      <p className="text-sm text-gray-500">Drop files here or <span className="text-indigo-600">browse</span></p>
+                      <input
+                        id="file-input"
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={e => {
+                          if (e.target.files) setUploadedFiles(prev => [...prev, ...Array.from(e.target.files!)])
+                        }}
+                      />
+                    </div>
+                    {uploadedFiles.length > 0 && (
+                      <ul className="mt-3 space-y-1">
+                        {uploadedFiles.map((f, i) => (
+                          <li key={i} className="flex items-center gap-2 text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2">
+                            <span className="flex-1 truncate">{f.name}</span>
+                            <button
+                              onClick={() => setUploadedFiles(prev => prev.filter((_, j) => j !== i))}
+                              className="text-gray-400 hover:text-gray-600"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
                 {s2Valid && (
                   <button
                     onClick={() => setS2Done(true)}
