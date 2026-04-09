@@ -4,7 +4,7 @@ import { useState } from 'react'
 import {
   Bot, Upload, Sparkles, ShieldCheck, Tag, Package,
   Check, Eye, HardDrive, FolderOpen, X,
-  LayoutDashboard, FilePlus, History, Settings, LogOut, Menu,
+  LayoutDashboard, FilePlus, Settings, LogOut, Menu,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -174,7 +174,6 @@ function Header({ active }: { active: 'request' | 'pipeline' }) {
   const nav = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'request', label: 'New Request', icon: FilePlus },
-    { id: 'pipeline', label: 'Pipeline', icon: History },
     { id: 'settings', label: 'Settings', icon: Settings },
   ]
 
@@ -211,11 +210,10 @@ function Header({ active }: { active: 'request' | 'pipeline' }) {
             return (
               <button
                 key={id}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left ${
-                  isActive
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                }`}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left ${isActive
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                  }`}
               >
                 <Icon className="w-4 h-4 flex-shrink-0" />
                 {label}
@@ -230,8 +228,8 @@ function Header({ active }: { active: 'request' | 'pipeline' }) {
               J
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-medium text-gray-800 truncate">Jane Smith</p>
-              <p className="text-xs text-gray-400 truncate">jane@acme.ai</p>
+              <p className="text-xs font-medium text-gray-800 truncate">Yasmine Elsheikh</p>
+              <p className="text-xs text-gray-400 truncate">ja@acme.ai</p>
             </div>
           </div>
           <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition-colors">
@@ -250,7 +248,7 @@ function PipelineScreen({ stages, onBack }: { stages: Stage[]; onBack: () => voi
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <Header active="pipeline" />
-      <main className="flex-1 max-w-2xl px-10 py-10">
+      <main className="flex-1 flex justify-center px-6 py-10"><div className="w-full max-w-2xl">
         <div className="mb-8">
           <button
             onClick={onBack}
@@ -314,7 +312,7 @@ function PipelineScreen({ stages, onBack }: { stages: Stage[]; onBack: () => voi
         <p className="text-xs text-gray-400 text-center mt-6">
           Pipeline updates in real time as your data moves through each stage.
         </p>
-      </main>
+      </div></main>
     </div>
   )
 }
@@ -496,7 +494,7 @@ export default function DemoPage() {
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <Header active="request" />
-      <main className="flex-1 max-w-2xl px-10 py-10 space-y-3">
+      <main className="flex-1 flex justify-center px-6 py-10"><div className="w-full max-w-2xl space-y-3">
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-gray-900">New Request</h1>
         </div>
@@ -615,11 +613,10 @@ export default function DemoPage() {
                     <button
                       key={value}
                       onClick={() => setUploadMethod(value)}
-                      className={`p-4 rounded-xl border-2 text-left transition-all ${
-                        uploadMethod === value
-                          ? 'border-indigo-400 bg-indigo-50'
-                          : 'border-gray-200 bg-white hover:border-gray-300'
-                      }`}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${uploadMethod === value
+                        ? 'border-indigo-400 bg-indigo-50'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                        }`}
                     >
                       <Icon className={`w-5 h-5 mb-2.5 ${uploadMethod === value ? 'text-indigo-600' : 'text-gray-400'}`} />
                       <div className={`font-semibold text-sm ${uploadMethod === value ? 'text-indigo-700' : 'text-gray-800'}`}>{label}</div>
@@ -638,11 +635,10 @@ export default function DemoPage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => setStorageProvider('AWS S3')}
-                          className={`px-4 py-2 rounded-lg text-sm border font-medium transition-all ${
-                            storageProvider === 'AWS S3'
-                              ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                          }`}
+                          className={`px-4 py-2 rounded-lg text-sm border font-medium transition-all ${storageProvider === 'AWS S3'
+                            ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                            }`}
                         >
                           AWS S3
                         </button>
@@ -678,11 +674,10 @@ export default function DemoPage() {
                         setUploadedFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)])
                       }}
                       onClick={() => document.getElementById('file-input')?.click()}
-                      className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-                        dragOver
-                          ? 'border-indigo-400 bg-indigo-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
+                      className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${dragOver
+                        ? 'border-indigo-400 bg-indigo-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                        }`}
                     >
                       <Upload className={`w-5 h-5 mx-auto mb-2 ${dragOver ? 'text-indigo-400' : 'text-gray-300'}`} />
                       <p className="text-sm text-gray-500">Drop files here or <span className="text-indigo-600">browse</span></p>
@@ -758,11 +753,10 @@ export default function DemoPage() {
                       <button
                         key={m}
                         onClick={() => setAugMultiplier(m.replace('×', ''))}
-                        className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${
-                          augMultiplier === m.replace('×', '')
-                            ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                        }`}
+                        className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${augMultiplier === m.replace('×', '')
+                          ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                          }`}
                       >
                         {m}
                       </button>
@@ -874,7 +868,7 @@ export default function DemoPage() {
         )}
 
         <div className="h-8" />
-      </main>
+      </div></main>
     </div>
   )
 }
