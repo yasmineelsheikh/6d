@@ -9,7 +9,10 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type DataSource = 'collect' | 'upload'
-type DataType = 'Teleoperation' | 'Motion Capture' | 'Egocentric'
+type TaskType = 'Manipulation' | 'Pick & Place' | 'Tool Use' | 'Bimanual'
+type Environment = 'Tabletop' | 'Shelf' | 'Bin'
+type CameraType = 'RGB' | 'Stereo' | 'Depth' | 'Wrist'
+type Hours = '10–100 hrs' | '100–1000 hrs' | '1000+ hrs'
 type DataFormat = 'HDF5' | 'MP4+JSON' | 'ROS Bag'
 type QualityMode = 'check-only' | 'check-and-fix'
 type AugGoal = 'More diversity' | 'New objects' | 'New environments' | 'More volume'
@@ -285,20 +288,21 @@ export default function DemoPage() {
   const [dataSource, setDataSource] = useState<DataSource | null>(null)
   const [s1Done, setS1Done] = useState(false)
 
-  // Section 2
-  const [dataType, setDataType] = useState<DataType | null>(null)
-  const [targetHours, setTargetHours] = useState<string>('')
-  const [additionalSpecs, setAdditionalSpecs] = useState('')
-  const [s2Done, setS2Done] = useState(false)
+  // Section 2 — Collect
+  const [taskType, setTaskType] = useState<TaskType | null>(null)
+  const [environment, setEnvironment] = useState<Environment | null>(null)
+  const [cameras, setCameras] = useState<CameraType[]>([])
+  const [targetHours, setTargetHours] = useState<Hours | null>(null)
 
-  // Upload specifics
+  // Section 2 — Upload
   const [datasetId, setDatasetId] = useState('')
   const [dataFormat, setDataFormat] = useState<DataFormat | null>(null)
+  const [s2Done, setS2Done] = useState(false)
 
   // Section 3 — Augmentation
   const [augEnabled, setAugEnabled] = useState(false)
   const [augGoals, setAugGoals] = useState<AugGoal[]>([])
-  const [augHours, setAugHours] = useState<string>('')
+  const [augHours, setAugHours] = useState<Hours | null>(null)
 
   // Section 4 — Quality
   const [qualityEnabled, setQualityEnabled] = useState(false)
@@ -319,11 +323,15 @@ export default function DemoPage() {
   const toggleAnnotation = (a: AnnotationType) =>
     setAnnotations(p => p.includes(a) ? p.filter(x => x !== a) : [...p, a])
 
-  const s2Valid = dataType !== null && targetHours !== ''
+  const s2Valid = dataSource === 'collect'
+    ? (taskType !== null && environment !== null && cameras.length > 0 && targetHours !== null)
+    : (dataFormat !== null)
 
   const s1Summary = dataSource === 'collect' ? 'Collect new data' : 'Upload existing data'
 
-  const s2Summary = [dataType, targetHours ? `${targetHours} hrs` : null].filter(Boolean).join(' · ')
+  const s2Summary = dataSource === 'collect'
+    ? [taskType, environment, cameras.join(' + '), targetHours].filter(Boolean).join(' · ')
+    : [dataFormat, datasetId ? `"${datasetId}"` : null].filter(Boolean).join(' · ')
 
   function getPipelineStages(): Stage[] {
     const raw: Omit<Stage, 'status'>[] = []
@@ -332,14 +340,14 @@ export default function DemoPage() {
       raw.push({
         id: 'collection',
         name: 'Collection',
-        description: [dataType, targetHours && `${targetHours} hrs`].filter(Boolean).join(' · '),
+        description: [taskType, environment && `${environment} environment`, cameras.length > 0 && `${cameras.join(', ')} cameras`, targetHours].filter(Boolean).join(' · '),
         icon: Bot,
       })
     } else {
       raw.push({
         id: 'ingestion',
         name: 'Ingestion',
-        description: [dataType, targetHours && `${targetHours} hrs`].filter(Boolean).join(' · ') || 'Processing uploaded dataset',
+        description: [dataFormat && `${dataFormat} format`, datasetId && `Dataset: ${datasetId}`].filter(Boolean).join(' · ') || 'Processing uploaded dataset',
         icon: Upload,
       })
     }
@@ -396,13 +404,15 @@ export default function DemoPage() {
 
   const reviewItems = [
     { label: 'Source', value: s1Summary },
-    { label: 'Data Type', value: dataType ?? '—' },
-    { label: 'Volume', value: targetHours ? `${targetHours} hrs` : '—' },
-    ...(additionalSpecs ? [{ label: 'Additional Specs', value: additionalSpecs }] : []),
-    ...(dataSource === 'upload' ? [
+    ...(dataSource === 'collect' ? [
+      { label: 'Task', value: taskType ?? '—' },
+      { label: 'Environment', value: environment ?? '—' },
+      { label: 'Cameras', value: cameras.length > 0 ? cameras.join(', ') : '—' },
+      { label: 'Volume', value: targetHours ?? '—' },
+    ] : [
       { label: 'Format', value: dataFormat ?? '—' },
       ...(datasetId ? [{ label: 'Dataset ID', value: datasetId }] : []),
-    ] : []),
+    ]),
     ...(augEnabled ? [
       { label: 'Augmentation', value: augGoals.length > 0 ? augGoals.join(', ') : 'Enabled' },
       ...(augHours ? [{ label: 'Aug volume', value: augHours }] : []),
@@ -495,78 +505,81 @@ export default function DemoPage() {
             summary={s2Summary}
             onEdit={handleEditS2}
           >
-            <div className="space-y-5">
-              <div>
-                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
-                  Data Type
-                </label>
-                <Chips<DataType>
-                  options={['Teleoperation', 'Motion Capture', 'Egocentric']}
-                  selected={dataType ? [dataType] : []}
-                  onToggle={(v) => setDataType(v)}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
-                  Target Hours
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="e.g. 100"
-                    value={targetHours}
-                    onChange={e => setTargetHours(e.target.value)}
-                    className="w-full max-w-[120px] text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 bg-white focus:outline-none focus:border-indigo-300"
-                  />
-                  <span className="text-sm text-gray-400">hours</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
-                  Additional Specifications
-                </label>
-                <textarea
-                  placeholder="Describe hardware, environment, or specific requirements..."
-                  value={additionalSpecs}
-                  onChange={e => setAdditionalSpecs(e.target.value)}
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 bg-white focus:outline-none focus:border-indigo-300 min-h-[80px]"
-                />
-              </div>
-
-              {dataSource === 'upload' && (
-                <div className="pt-2 border-t border-gray-100">
+            {dataSource === 'collect' ? (
+              <div className="space-y-5">
+                <div>
                   <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
-                    Upload Details
+                    Task Type
                   </label>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
+                  <SegmentedControl<TaskType>
+                    options={['Manipulation', 'Pick & Place', 'Tool Use', 'Bimanual']}
+                    value={taskType}
+                    onChange={setTaskType}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
+                    Environment
+                  </label>
+                  <SegmentedControl<Environment>
+                    options={['Tabletop', 'Shelf', 'Bin']}
+                    value={environment}
+                    onChange={setEnvironment}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
+                    Camera Config
+                  </label>
+                  <Chips<CameraType>
+                    options={['RGB', 'Stereo', 'Depth', 'Wrist']}
+                    selected={cameras}
+                    onToggle={toggleCamera}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
+                    Target Volume
+                  </label>
+                  <HoursSelector value={targetHours} onChange={setTargetHours} />
+                </div>
+                {s2Valid && (
+                  <button
+                    onClick={() => setS2Done(true)}
+                    className="w-full py-2.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-gray-700 transition-colors"
+                  >
+                    Continue →
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
+                    Upload Dataset
+                  </label>
+                  <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-gray-300 transition-colors">
+                    <Upload className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-400 mb-3">Upload dataset or paste dataset ID</p>
                     <input
                       type="text"
-                      placeholder="Dataset ID (optional)"
+                      placeholder="dataset-xxxxxxxx"
                       value={datasetId}
                       onChange={e => setDatasetId(e.target.value)}
-                      className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 bg-white focus:outline-none focus:border-indigo-300"
-                    />
-                    <SegmentedControl<DataFormat>
-                      options={['HDF5', 'MP4+JSON', 'ROS Bag']}
-                      value={dataFormat}
-                      onChange={setDataFormat}
+                      className="w-full max-w-xs mx-auto block text-sm border border-gray-200 rounded-lg px-3 py-2 text-center text-gray-700 bg-white focus:outline-none focus:border-indigo-300"
                     />
                   </div>
                 </div>
-              )}
-
-              {s2Valid && (
-                <button
-                  onClick={() => setS2Done(true)}
-                  className="w-full py-2.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-gray-700 transition-colors"
-                >
-                  Continue →
-                </button>
-              )}
-            </div>
+                {s2Valid && (
+                  <button
+                    onClick={() => setS2Done(true)}
+                    className="w-full py-2.5 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-gray-700 transition-colors"
+                  >
+                    Continue →
+                  </button>
+                )}
+              </div>
+            )}
           </SectionCard>
         )}
 
