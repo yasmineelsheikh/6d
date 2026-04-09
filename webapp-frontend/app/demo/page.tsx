@@ -14,7 +14,6 @@ type UploadMethod = 'connect' | 'files'
 type StorageProvider = 'AWS S3'
 type QualityMode = 'check-only' | 'check-and-fix'
 type AugGoal = 'More diversity' | 'New objects' | 'New environments' | 'More volume'
-type AnnotationType = '3D scene reconstruction' | 'Hand pose tracking' | 'Point tracking' | 'Object 6DoF pose'
 
 interface Stage {
   id: string
@@ -247,10 +246,12 @@ function Header() {
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4">
       <div className="flex items-center gap-3">
-        <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
-          <span className="text-white text-xs font-bold">6d</span>
-        </div>
-        <span className="text-gray-900 font-semibold text-sm">6d labs</span>
+        <a href="/" className="flex items-center gap-3 hover:opacity-75 transition-opacity">
+          <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
+            <span className="text-white text-xs font-bold">6d</span>
+          </div>
+          <span className="text-gray-900 font-semibold text-sm">6d labs</span>
+        </a>
         <span className="text-gray-300 mx-0.5">·</span>
       </div>
     </header>
@@ -290,7 +291,7 @@ export default function DemoPage() {
 
   // Section 5 — Annotation
   const [annotationEnabled, setAnnotationEnabled] = useState(false)
-  const [annotations, setAnnotations] = useState<AnnotationType[]>([])
+  const [annotationNotes, setAnnotationNotes] = useState('')
 
   // UI
   const [showReview, setShowReview] = useState(false)
@@ -300,8 +301,6 @@ export default function DemoPage() {
     setDataTypes(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t])
   const toggleAugGoal = (g: AugGoal) =>
     setAugGoals(p => p.includes(g) ? p.filter(x => x !== g) : [...p, g])
-  const toggleAnnotation = (a: AnnotationType) =>
-    setAnnotations(p => p.includes(a) ? p.filter(x => x !== a) : [...p, a])
 
   const s2Valid = dataSource === 'collect'
     ? (dataTypes.length > 0 && targetHours !== '')
@@ -377,7 +376,7 @@ export default function DemoPage() {
       raw.push({
         id: 'annotation',
         name: 'Annotation',
-        description: annotations.length > 0 ? annotations.join(' · ') : 'Labeling and pose estimation',
+        description: annotationNotes.trim() || 'Labeling and pose estimation',
         icon: Tag,
       })
     }
@@ -415,7 +414,7 @@ export default function DemoPage() {
       { label: 'Quality', value: qualityMode === 'check-only' ? 'Check only' : 'Check and fix' },
     ] : []),
     ...(annotationEnabled ? [
-      { label: 'Annotations', value: annotations.length > 0 ? annotations.join(', ') : 'Enabled' },
+      { label: 'Annotations', value: annotationNotes.trim() || 'Enabled' },
     ] : []),
   ]
 
@@ -765,25 +764,13 @@ export default function DemoPage() {
               enabled={annotationEnabled}
               onToggle={() => setAnnotationEnabled(p => !p)}
             >
-              <div className="space-y-2">
-                {(['3D scene reconstruction', 'Hand pose tracking', 'Point tracking', 'Object 6DoF pose'] as AnnotationType[]).map(ann => (
-                  <label
-                    key={ann}
-                    className={`flex items-center gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${annotations.includes(ann)
-                      ? 'border-indigo-200 bg-indigo-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                      }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={annotations.includes(ann)}
-                      onChange={() => toggleAnnotation(ann)}
-                      className="accent-indigo-600"
-                    />
-                    <span className="text-sm text-gray-700">{ann}</span>
-                  </label>
-                ))}
-              </div>
+              <textarea
+                rows={3}
+                placeholder="Describe the annotation requirements…"
+                value={annotationNotes}
+                onChange={e => setAnnotationNotes(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:border-indigo-300 resize-none"
+              />
             </OptionalSection>
           </>
         )}
