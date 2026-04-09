@@ -37,11 +37,10 @@ function SegmentedControl<T extends string>({
         <button
           key={opt}
           onClick={() => onChange(opt)}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-            value === opt
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
+          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${value === opt
+            ? 'bg-white text-gray-900 shadow-sm'
+            : 'text-gray-500 hover:text-gray-700'
+            }`}
         >
           {opt}
         </button>
@@ -61,11 +60,10 @@ function Chips<T extends string>({
           <button
             key={opt}
             onClick={() => onToggle(opt)}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm border transition-all ${
-              active
-                ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-            }`}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm border transition-all ${active
+              ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+              }`}
           >
             {active && <Check className="w-3 h-3" />}
             {opt}
@@ -84,11 +82,10 @@ function HoursSelector({ value, onChange }: { value: Hours | null; onChange: (v:
         <button
           key={h}
           onClick={() => onChange(h)}
-          className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${
-            value === h
-              ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-          }`}
+          className={`flex-1 py-2 px-3 rounded-lg text-sm border font-medium transition-all ${value === h
+            ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+            : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+            }`}
         >
           {h}
         </button>
@@ -101,14 +98,12 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
   return (
     <button
       onClick={onToggle}
-      className={`relative w-10 h-6 rounded-full transition-colors focus:outline-none flex-shrink-0 ${
-        enabled ? 'bg-indigo-600' : 'bg-gray-200'
-      }`}
+      className={`relative w-10 h-6 rounded-full transition-colors focus:outline-none flex-shrink-0 ${enabled ? 'bg-indigo-600' : 'bg-gray-200'
+        }`}
     >
       <span
-        className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${
-          enabled ? 'translate-x-4' : ''
-        }`}
+        className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${enabled ? 'translate-x-4' : ''
+          }`}
       />
     </button>
   )
@@ -127,13 +122,11 @@ function SectionCard({
   children: React.ReactNode
 }) {
   return (
-    <div className={`bg-white rounded-xl border transition-all ${
-      done ? 'border-gray-200' : 'border-gray-200 shadow-sm'
-    }`}>
+    <div className={`bg-white rounded-xl border transition-all ${done ? 'border-gray-200' : 'border-gray-200 shadow-sm'
+      }`}>
       <div className="px-5 py-4 flex items-center gap-3">
-        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
-          done ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'
-        }`}>
+        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${done ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-500'
+          }`}>
           {done ? <Check className="w-3.5 h-3.5" /> : number}
         </div>
         <span className={`font-medium text-sm ${done ? 'text-gray-500' : 'text-gray-900'}`}>
@@ -171,9 +164,8 @@ function OptionalSection({
   children: React.ReactNode
 }) {
   return (
-    <div className={`bg-white rounded-xl border transition-all ${
-      enabled ? 'border-indigo-200 shadow-sm' : 'border-gray-200'
-    }`}>
+    <div className={`bg-white rounded-xl border transition-all ${enabled ? 'border-indigo-200 shadow-sm' : 'border-gray-200'
+      }`}>
       <div className="px-5 py-4 flex items-center gap-3">
         <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-400 flex-shrink-0">
           {number}
@@ -225,15 +217,13 @@ function PipelineScreen({ stages, onBack }: { stages: Stage[]; onBack: () => voi
             return (
               <div
                 key={stage.id}
-                className={`flex gap-4 px-6 py-5 ${!isLast ? 'border-b border-gray-100' : ''} ${
-                  isActive ? 'bg-indigo-50/60' : ''
-                }`}
+                className={`flex gap-4 px-6 py-5 ${!isLast ? 'border-b border-gray-100' : ''} ${isActive ? 'bg-indigo-50/60' : ''
+                  }`}
               >
                 {/* Icon + connector */}
                 <div className="flex flex-col items-center">
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'
-                  }`}>
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-400'
+                    }`}>
                     <Icon className="w-4 h-4" />
                   </div>
                   {!isLast && (
@@ -278,13 +268,12 @@ function PipelineScreen({ stages, onBack }: { stages: Stage[]; onBack: () => voi
 function Header() {
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4">
-      <div className="max-w-2xl mx-auto flex items-center gap-3">
+      <div className="flex items-center gap-3">
         <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
           <span className="text-white text-xs font-bold">6d</span>
         </div>
         <span className="text-gray-900 font-semibold text-sm">6d labs</span>
         <span className="text-gray-300 mx-0.5">·</span>
-        <span className="text-gray-400 text-sm">Data Operations</span>
       </div>
     </header>
   )
@@ -457,7 +446,6 @@ export default function DemoPage() {
       <main className="max-w-2xl mx-auto px-6 py-10 space-y-3">
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-gray-900">New Request</h1>
-          <p className="text-sm text-gray-500 mt-1">Configure your robotics data operation.</p>
         </div>
 
         {/* ── Section 1: Data Source ── */}
@@ -475,23 +463,20 @@ export default function DemoPage() {
                   value: 'collect' as DataSource,
                   icon: Bot,
                   title: 'Collect',
-                  desc: 'Platform collects new robot demonstrations',
                 },
                 {
                   value: 'upload' as DataSource,
                   icon: Upload,
                   title: 'Upload',
-                  desc: 'Bring your own existing dataset',
                 },
               ] as const).map(({ value, icon: Icon, title, desc }) => (
                 <button
                   key={value}
                   onClick={() => setDataSource(value)}
-                  className={`p-4 rounded-xl border-2 text-left transition-all ${
-                    dataSource === value
-                      ? 'border-indigo-400 bg-indigo-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
+                  className={`p-4 rounded-xl border-2 text-left transition-all ${dataSource === value
+                    ? 'border-indigo-400 bg-indigo-50'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
                 >
                   <Icon className={`w-5 h-5 mb-2.5 ${dataSource === value ? 'text-indigo-600' : 'text-gray-400'}`} />
                   <div className={`font-semibold text-sm ${dataSource === value ? 'text-indigo-700' : 'text-gray-800'}`}>
@@ -586,16 +571,6 @@ export default function DemoPage() {
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">
-                    Data Format
-                  </label>
-                  <SegmentedControl<DataFormat>
-                    options={['HDF5', 'MP4+JSON', 'ROS Bag']}
-                    value={dataFormat}
-                    onChange={setDataFormat}
-                  />
-                </div>
                 {s2Valid && (
                   <button
                     onClick={() => setS2Done(true)}
@@ -652,11 +627,10 @@ export default function DemoPage() {
                 {(['check-only', 'check-and-fix'] as QualityMode[]).map(mode => (
                   <label
                     key={mode}
-                    className={`flex items-start gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${
-                      qualityMode === mode
-                        ? 'border-indigo-200 bg-indigo-50'
-                        : 'border-gray-200 bg-white hover:border-gray-300'
-                    }`}
+                    className={`flex items-start gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${qualityMode === mode
+                      ? 'border-indigo-200 bg-indigo-50'
+                      : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
                   >
                     <input
                       type="radio"
@@ -699,11 +673,10 @@ export default function DemoPage() {
                 {(['3D scene reconstruction', 'Hand pose tracking', 'Point tracking', 'Object 6DoF pose'] as AnnotationType[]).map(ann => (
                   <label
                     key={ann}
-                    className={`flex items-center gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${
-                      annotations.includes(ann)
-                        ? 'border-indigo-200 bg-indigo-50'
-                        : 'border-gray-200 bg-white hover:border-gray-300'
-                    }`}
+                    className={`flex items-center gap-3 p-3.5 rounded-lg border cursor-pointer transition-all ${annotations.includes(ann)
+                      ? 'border-indigo-200 bg-indigo-50'
+                      : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
                   >
                     <input
                       type="checkbox"
